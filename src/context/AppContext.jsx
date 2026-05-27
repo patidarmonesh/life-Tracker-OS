@@ -9,9 +9,11 @@ import {
   sampleHealthLogs,
   sampleSettings,
 } from '../data/sampleData'
-import { syncAll, autoSave, ensureInitialFiles } from '../services/driveService'
+import { syncAll, autoSave, ensureInitialFiles, deleteAllFiles } from '../services/driveService'
 import { getAccessToken } from '../services/authService'
+
 const STORAGE_KEY = 'lifeos-app-state-v1'
+const LAST_SYNC_KEY = 'lifeos-last-sync-time'
 
 const initialState = {
   finance: { expenses: [], budgets: {}, categories: [], bills: [] },
@@ -77,6 +79,7 @@ const initialState = {
   syncStatus: 'idle',
   lastSynced: null,
   hydrated: false,
+  isFromDrive: false, // Track if data came from Google Drive
 }
 
 const MODULE_FILE_MAP = {
@@ -89,6 +92,7 @@ const MODULE_FILE_MAP = {
   settings: 'settings.json',
   aiChat: 'aiChat.json',
 }
+
 function buildSampleState() {
   return {
     ...initialState,
@@ -134,6 +138,7 @@ function buildSampleState() {
     syncStatus: 'synced',
     lastSynced: new Date().toISOString(),
     hydrated: true,
+    isFromDrive: false,
   }
 }
 
@@ -258,6 +263,8 @@ function reducer(state, action) {
 
 const AppContext = createContext(null)
 
+let syncIntervalId = null
+
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState)
 
@@ -265,82 +272,82 @@ export function AppProvider({ children }) {
     let cancelled = false
 
     async function hydrateApp() {
-      let localData = null
-
       try {
-        const raw = localStorage.getItem(STORAGE_KEY)
-        if (raw) {
-          localData = JSON.parse(raw)
+        // 🔥 FIX 1: Try Google Drive FIRST, not localStorage
+        if (!cancelled) {
+          dispatch({ type: 'SET_SYNC_STATUS', status: 'syncing' })
+        }
+
+        const token = getAccessToken()
+
+        if (token) {
+          try {
+            await ensureInitialFiles()
+            const files = await syncAll()
+            const mergedDriveState = driveDataToAppState(files)
+
+            if (!cancelled) {
+              dispatch({
+                type: 'HYDRATE_STATE',
+                data: {
+                  ...mergedDriveState,
+                  syncStatus: 'synced',
+                  lastSynced: new Date().toISOString(),
+                  hydrated: true,
+                  isFromDrive: true,
+                },
+              })
+              localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString())
+            }
+            return
+          } catch (driveError) {
+            console.warn('Drive sync failed, falling back to local cache:', driveError)
+          }
+        }
+
+        // Fallback to localStorage only if Drive sync failed or no token
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY)
+          if (raw) {
+            const localData = JSON.parse(raw)
+            if (!cancelled) {
+              dispatch({
+                type: 'HYDRATE_STATE',
+                data: {
+                  ...mergeWithInitialState(localData),
+                  syncStatus: navigator.onLine ? 'offline' : 'offline',
+                  hydrated: true,
+                  isFromDrive: false,
+                },
+              })
+            }
+          } else {
+            throw new Error('No local data')
+          }
+        } catch {
           if (!cancelled) {
             dispatch({
               type: 'HYDRATE_STATE',
               data: {
-                ...mergeWithInitialState(localData),
-                syncStatus: 'idle',
+                ...buildSampleState(),
+                syncStatus: 'offline',
                 hydrated: true,
+                isFromDrive: false,
               },
             })
           }
-        } else if (!cancelled) {
-          dispatch({
-            type: 'HYDRATE_STATE',
-            data: {
-              ...buildSampleState(),
-              syncStatus: 'idle',
-              hydrated: true,
-            },
-          })
         }
       } catch (error) {
-        console.error('Failed to load local app state:', error)
+        console.error('Fatal app initialization error:', error)
         if (!cancelled) {
           dispatch({
             type: 'HYDRATE_STATE',
             data: {
               ...buildSampleState(),
-              syncStatus: 'idle',
+              syncStatus: 'offline',
               hydrated: true,
+              isFromDrive: false,
             },
-          })
-        }
-      }
-
-      try {
-        if (!cancelled) {
-          dispatch({ type: 'SET_SYNC_STATUS', status: 'syncing' })
-        }
-        const token = getAccessToken()
-
-        if (!token) {
-          if (!cancelled) {
-            dispatch({
-              type: 'SET_SYNC_STATUS',
-              status: 'offline',
-            })
-          }
-          return
-        }
-        await ensureInitialFiles()
-        const files = await syncAll()
-        const mergedDriveState = driveDataToAppState(files)
-
-        if (!cancelled) {
-          dispatch({
-            type: 'HYDRATE_STATE',
-            data: {
-              ...mergedDriveState,
-              syncStatus: 'synced',
-              lastSynced: new Date().toISOString(),
-              hydrated: true,
-            },
-          })
-        }
-      } catch (error) {
-        console.error('Failed to sync with Drive, using local cache:', error)
-        if (!cancelled) {
-          dispatch({
-            type: 'SET_SYNC_STATUS',
-            status: navigator.onLine ? 'idle' : 'offline',
           })
         }
       }
@@ -353,12 +360,47 @@ export function AppProvider({ children }) {
     }
   }, [])
 
+  // 🔥 FIX 2: Periodic sync every 15 seconds for cross-device updates
+  useEffect(() => {
+    if (!state.hydrated) return
+
+    const token = getAccessToken()
+    if (!token) return
+
+    const performPeriodicSync = async () => {
+      try {
+        const files = await syncAll()
+        const mergedDriveState = driveDataToAppState(files)
+
+        dispatch({
+          type: 'HYDRATE_STATE',
+          data: {
+            ...mergedDriveState,
+            syncStatus: 'synced',
+            lastSynced: new Date().toISOString(),
+            hydrated: true,
+            isFromDrive: true,
+          },
+        })
+      } catch (error) {
+        console.error('Periodic sync failed:', error)
+      }
+    }
+
+    syncIntervalId = setInterval(performPeriodicSync, 15000) // Every 15 seconds
+
+    return () => {
+      if (syncIntervalId) clearInterval(syncIntervalId)
+    }
+  }, [state.hydrated])
+
+  // Auto-save to localStorage (fallback only)
   useEffect(() => {
     if (!state.hydrated) return
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
     } catch (error) {
-      console.error('Failed to save app state:', error)
+      console.error('Failed to save app state to localStorage:', error)
     }
   }, [state])
 
@@ -370,7 +412,8 @@ export function AppProvider({ children }) {
       dispatch({ type: 'SET_SYNC_STATUS', status: 'syncing' })
 
       try {
-        autoSave(fileName, data, 2000)
+        // 🔥 FIX 3: Always save to Google Drive first
+        autoSave(fileName, data, 1000) // Reduced delay for faster sync
         dispatch({
           type: 'SET_SYNC_STATUS',
           status: navigator.onLine ? 'synced' : 'offline',
@@ -436,10 +479,25 @@ export function AppProvider({ children }) {
       persistModule('settings', nextSettings)
     }
 
-    const resetToSample = () => {
+    // 🔥 FIX 4: Delete all data from BOTH Google Drive AND localStorage
+    const resetToSample = async () => {
       const sample = buildSampleState()
       dispatch({ type: 'RESET_TO_SAMPLE' })
 
+      // Delete from Google Drive first
+      try {
+        const token = getAccessToken()
+        if (token) {
+          await deleteAllFiles()
+        }
+      } catch (error) {
+        console.error('Failed to delete from Google Drive:', error)
+      }
+
+      // Then reset local storage
+      localStorage.removeItem(STORAGE_KEY)
+
+      // Save sample data
       persistModule('finance', sample.finance)
       persistModule('timeflow', sample.timeflow)
       persistModule('study', sample.study)
@@ -449,6 +507,38 @@ export function AppProvider({ children }) {
       persistModule('settings', sample.settings)
     }
 
+    // 🔥 FIX 5: Manual refresh function to sync from Google Drive
+    const refreshFromDrive = async () => {
+      try {
+        dispatch({ type: 'SET_SYNC_STATUS', status: 'syncing' })
+        const token = getAccessToken()
+        if (!token) {
+          dispatch({ type: 'SET_SYNC_STATUS', status: 'offline' })
+          return
+        }
+
+        const files = await syncAll()
+        const mergedDriveState = driveDataToAppState(files)
+
+        dispatch({
+          type: 'HYDRATE_STATE',
+          data: {
+            ...mergedDriveState,
+            syncStatus: 'synced',
+            lastSynced: new Date().toISOString(),
+            hydrated: true,
+            isFromDrive: true,
+          },
+        })
+      } catch (error) {
+        console.error('Manual refresh failed:', error)
+        dispatch({
+          type: 'SET_SYNC_STATUS',
+          status: navigator.onLine ? 'idle' : 'offline',
+        })
+      }
+    }
+
     return {
       state,
       setModule,
@@ -456,6 +546,7 @@ export function AppProvider({ children }) {
       setSyncStatus,
       setSettings,
       resetToSample,
+      refreshFromDrive,
     }
   }, [state])
 
