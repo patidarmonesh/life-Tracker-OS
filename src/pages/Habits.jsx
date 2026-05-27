@@ -1,0 +1,370 @@
+import { useState } from 'react'
+import { useApp } from '../context/AppContext'
+import { format, subDays, eachDayOfInterval, startOfMonth } from 'date-fns'
+import { v4 as uuid } from 'uuid'
+import { Plus, Trash2, Check, X } from 'lucide-react'
+import Card from '../components/ui/Card'
+import Button from '../components/ui/Button'
+import Modal from '../components/ui/Modal'
+
+const today = format(new Date(), 'yyyy-MM-dd')
+
+const HABIT_ICONS = ['💪', '📚', '💧', '🧘', '🏃', '🥗', '😴', '✍️', '🎯', '🚫', '💊', '🧠', '🌿', '🛁', '📵']
+const HABIT_COLORS = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#F97316', '#06B6D4', '#EF4444', '#6366F1', '#84CC16']
+const CATEGORIES = ['Health', 'Fitness', 'Study', 'Mindfulness', 'Nutrition', 'Sleep', 'Social', 'Other']
+
+const DEFAULT_HABITS = [
+  { id: uuid(), name: 'Morning Workout', icon: '💪', color: '#EC4899', category: 'Fitness', targetDays: 'everyday', notes: '', streak: 0, completions: {} },
+  { id: uuid(), name: 'Read / Study', icon: '📚', color: '#3B82F6', category: 'Study', targetDays: 'everyday', notes: '', streak: 0, completions: {} },
+  { id: uuid(), name: 'Drink 3L Water', icon: '💧', color: '#06B6D4', category: 'Health', targetDays: 'everyday', notes: '', streak: 0, completions: {} },
+  { id: uuid(), name: 'No Social Media before 12pm', icon: '📵', color: '#F43F5E', category: 'Other', targetDays: 'everyday', notes: '', streak: 0, completions: {} },
+  { id: uuid(), name: 'Sleep before 1am', icon: '😴', color: '#8B5CF6', category: 'Sleep', targetDays: 'everyday', notes: '', streak: 0, completions: {} },
+]
+
+export default function Habits() {
+  const { state, setModule } = useApp()
+  const [activeTab, setActiveTab] = useState('today')
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [selectedDate, setSelectedDate] = useState(today)
+  const [form, setForm] = useState({ name: '', icon: '🎯', color: '#10B981', category: 'Health', targetDays: 'everyday', notes: '' })
+
+  // Init default habits if none exist
+  const habits = state.habits?.habits?.length
+    ? state.habits.habits
+    : DEFAULT_HABITS
+
+  const completions = state.habits?.completions || {}
+
+  // ── Helpers ──────────────────────────────────────────────
+  function isCompleted(habitId, date) {
+    return completions[date]?.[habitId] === true
+  }
+
+  function toggleHabit(habitId, date) {
+    const dateMap = completions[date] || {}
+    const newDateMap = { ...dateMap, [habitId]: !dateMap[habitId] }
+    setModule('habits', {
+      ...state.habits,
+      habits,
+      completions: { ...completions, [date]: newDateMap }
+    })
+  }
+
+  function addHabit() {
+    if (!form.name.trim()) return
+    const newHabit = { id: uuid(), ...form, streak: 0, completions: {}, createdAt: new Date().toISOString() }
+    setModule('habits', { ...state.habits, habits: [...habits, newHabit], completions })
+    setShowAddModal(false)
+    setForm({ name: '', icon: '🎯', color: '#10B981', category: 'Health', targetDays: 'everyday', notes: '' })
+  }
+
+  function deleteHabit(id) {
+    if (!window.confirm('Delete this habit?')) return
+    setModule('habits', { ...state.habits, habits: habits.filter(h => h.id !== id), completions })
+  }
+
+  // ── Streak for a habit ────────────────────────────────────
+  function getStreak(habitId) {
+    let streak = 0
+    for (let i = 0; i < 365; i++) {
+      const d = format(subDays(new Date(), i), 'yyyy-MM-dd')
+      if (completions[d]?.[habitId]) streak++
+      else break
+    }
+    return streak
+  }
+
+  // ── Last N days for heatmap ────────────────────────────────
+  function getLast30(habitId) {
+    return Array.from({ length: 30 }, (_, i) => {
+      const d = format(subDays(new Date(), 29 - i), 'yyyy-MM-dd')
+      return { date: d, done: completions[d]?.[habitId] === true }
+    })
+  }
+
+  function getLast7(habitId) {
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = format(subDays(new Date(), 6 - i), 'yyyy-MM-dd')
+      return { date: d, day: format(new Date(d + 'T00:00:00'), 'EEE'), done: completions[d]?.[habitId] === true }
+    })
+  }
+
+  // ── Today stats ────────────────────────────────────────────
+  const todayDone = habits.filter(h => isCompleted(h.id, selectedDate)).length
+  const todayPct = habits.length > 0 ? Math.round((todayDone / habits.length) * 100) : 0
+
+  // ── Tabs ──────────────────────────────────────────────────
+  const tabStyle = (active, color = '#10B981') => ({
+    padding: '8px 18px', borderRadius: '8px 8px 0 0', border: 'none', cursor: 'pointer',
+    background: active ? 'var(--bg-card)' : 'transparent',
+    color: active ? color : 'var(--text-muted)',
+    fontWeight: active ? '700' : '400', fontSize: '14px', fontFamily: 'DM Sans, sans-serif',
+    borderBottom: active ? `2px solid ${color}` : '2px solid transparent',
+  })
+
+  const inputStyle = {
+    width: '100%', padding: '10px 12px', borderRadius: '10px',
+    background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+    color: 'var(--text-primary)', fontSize: '14px', outline: 'none', fontFamily: 'DM Sans, sans-serif',
+  }
+  const labelStyle = {
+    fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700',
+    marginBottom: '4px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em',
+  }
+
+  return (
+    <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+
+      {/* Header */}
+      <div style={{ padding: '20px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1 style={{ fontFamily: 'Syne, sans-serif', fontWeight: '800', fontSize: '1.4rem' }}>✅ Habits</h1>
+        <Button onClick={() => setShowAddModal(true)}><Plus size={16} /> New Habit</Button>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '4px', padding: '16px 24px 0', borderBottom: '1px solid var(--border)' }}>
+        {['today', 'streaks', 'heatmap'].map(tab => (
+          <button key={tab} onClick={() => setActiveTab(tab)} style={tabStyle(activeTab === tab)}>
+            {tab === 'today' ? 'Today' : tab === 'streaks' ? 'Streaks' : 'Heatmap'}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+        {/* ══ TODAY TAB ══════════════════════════════════════ */}
+        {activeTab === 'today' && <>
+          {/* Date selector + summary */}
+          <Card>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <div style={{ fontSize: '32px', fontWeight: '800', fontFamily: 'JetBrains Mono, monospace', color: todayPct === 100 ? '#10B981' : todayPct >= 60 ? '#F59E0B' : 'var(--text-primary)' }}>
+                  {todayDone}/{habits.length}
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>habits completed</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+                  style={{ ...inputStyle, width: 'auto', fontSize: '13px', padding: '7px 12px' }} />
+                <div style={{ fontSize: '12px', color: todayPct === 100 ? '#10B981' : 'var(--text-muted)' }}>
+                  {todayPct === 100 ? '🎉 Perfect day!' : `${todayPct}% done`}
+                </div>
+              </div>
+            </div>
+            {/* Progress bar */}
+            <div style={{ height: '8px', background: 'var(--bg-secondary)', borderRadius: '4px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${todayPct}%`, background: todayPct === 100 ? '#10B981' : '#F59E0B', borderRadius: '4px', transition: 'width 0.6s ease' }} />
+            </div>
+          </Card>
+
+          {/* Habit checklist */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {habits.map(habit => {
+              const done = isCompleted(habit.id, selectedDate)
+              const streak = getStreak(habit.id)
+              return (
+                <div key={habit.id} onClick={() => toggleHabit(habit.id, selectedDate)} style={{
+                  display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 16px',
+                  borderRadius: '14px', cursor: 'pointer',
+                  background: done ? `${habit.color}15` : 'var(--bg-card)',
+                  border: `1px solid ${done ? habit.color + '50' : 'var(--border)'}`,
+                  transition: 'all 0.2s',
+                  opacity: done ? 1 : 0.85,
+                }}>
+                  {/* Check circle */}
+                  <div style={{
+                    width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0,
+                    background: done ? habit.color : 'var(--bg-secondary)',
+                    border: `2px solid ${done ? habit.color : 'var(--border)'}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 0.2s', color: '#fff',
+                  }}>
+                    {done ? <Check size={16} /> : null}
+                  </div>
+
+                  {/* Icon + name */}
+                  <div style={{ fontSize: '22px', flexShrink: 0 }}>{habit.icon}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '14px', fontWeight: '700', color: done ? habit.color : 'var(--text-primary)', textDecoration: done ? 'line-through' : 'none', textDecorationColor: habit.color }}>
+                      {habit.name}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '1px' }}>
+                      {habit.category} {streak > 0 && `• 🔥 ${streak} day streak`}
+                    </div>
+                  </div>
+
+                  {/* Streak + delete */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {streak >= 7 && (
+                      <div style={{ fontSize: '12px', fontWeight: '800', color: habit.color, fontFamily: 'JetBrains Mono, monospace' }}>
+                        {streak}🔥
+                      </div>
+                    )}
+                    <button onClick={e => { e.stopPropagation(); deleteHabit(habit.id) }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px', opacity: 0.5 }}
+                      onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                      onMouseLeave={e => e.currentTarget.style.opacity = '0.5'}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>}
+
+        {/* ══ STREAKS TAB ════════════════════════════════════ */}
+        {activeTab === 'streaks' && <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {[...habits].map(habit => {
+              const streak = getStreak(habit.id)
+              const last7 = getLast7(habit.id)
+              const completionRate = Math.round((last7.filter(d => d.done).length / 7) * 100)
+              return (
+                <Card key={habit.id} style={{ padding: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                    <div style={{ fontSize: '24px' }}>{habit.icon}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '14px', fontWeight: '700' }}>{habit.name}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{habit.category}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '22px', fontWeight: '800', fontFamily: 'JetBrains Mono, monospace', color: habit.color }}>{streak}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>day streak 🔥</div>
+                    </div>
+                  </div>
+
+                  {/* Last 7 days mini grid */}
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: '50px' }}>Last 7d</span>
+                    <div style={{ display: 'flex', gap: '4px', flex: 1 }}>
+                      {last7.map(({ date, day, done }) => (
+                        <div key={date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                          <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: done ? habit.color : 'var(--bg-secondary)', border: `1px solid ${done ? habit.color : 'var(--border)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {done && <Check size={12} color="#fff" />}
+                          </div>
+                          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{day[0]}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: '12px', fontWeight: '700', color: completionRate >= 80 ? '#10B981' : completionRate >= 50 ? '#F59E0B' : '#F43F5E', marginLeft: '8px', fontFamily: 'JetBrains Mono, monospace' }}>
+                      {completionRate}%
+                    </div>
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+        </>}
+
+        {/* ══ HEATMAP TAB ════════════════════════════════════ */}
+        {activeTab === 'heatmap' && <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {habits.map(habit => {
+              const last30 = getLast30(habit.id)
+              const completedCount = last30.filter(d => d.done).length
+              return (
+                <Card key={habit.id}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '20px' }}>{habit.icon}</span>
+                      <span style={{ fontWeight: '700', fontSize: '14px' }}>{habit.name}</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{completedCount}/30 days</div>
+                  </div>
+
+                  {/* 30-day heatmap grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: '4px' }}>
+                    {last30.map(({ date, done }) => (
+                      <div key={date} title={date}
+                        style={{ height: '28px', borderRadius: '6px', background: done ? habit.color : 'var(--bg-secondary)', border: `1px solid ${done ? habit.color + '80' : 'var(--border)'}`, cursor: 'pointer', transition: 'all 0.15s' }}
+                        onClick={() => toggleHabit(habit.id, date)}
+                        onMouseEnter={e => e.currentTarget.style.opacity = '0.7'}
+                        onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Completion rate bar */}
+                  <div style={{ marginTop: '10px' }}>
+                    <div style={{ height: '4px', background: 'var(--bg-secondary)', borderRadius: '2px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${(completedCount / 30) * 100}%`, background: habit.color, borderRadius: '2px' }} />
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      {Math.round((completedCount / 30) * 100)}% completion rate (last 30 days)
+                    </div>
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+        </>}
+
+      </div>
+
+      {/* ══ ADD HABIT MODAL ════════════════════════════════════ */}
+      <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="New Habit">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div>
+            <label style={labelStyle}>Habit Name</label>
+            <input style={inputStyle} placeholder="e.g. Meditate for 10 mins" value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))} autoFocus />
+          </div>
+
+          {/* Icon picker */}
+          <div>
+            <label style={labelStyle}>Icon</label>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {HABIT_ICONS.map(icon => (
+                <button key={icon} onClick={() => setForm(f => ({ ...f, icon }))}
+                  style={{ width: '38px', height: '38px', borderRadius: '10px', border: '1px solid', fontSize: '20px', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                    borderColor: form.icon === icon ? 'var(--accent-indigo)' : 'var(--border)',
+                    background: form.icon === icon ? 'rgba(99,102,241,0.15)' : 'var(--bg-secondary)',
+                  }}>
+                  {icon}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Color picker */}
+          <div>
+            <label style={labelStyle}>Color</label>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {HABIT_COLORS.map(color => (
+                <button key={color} onClick={() => setForm(f => ({ ...f, color }))}
+                  style={{ width: '30px', height: '30px', borderRadius: '50%', background: color, border: `3px solid ${form.color === color ? 'var(--text-primary)' : 'transparent'}`, cursor: 'pointer' }} />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Category</label>
+            <select style={inputStyle} value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>
+              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Notes (optional)</label>
+            <input style={inputStyle} placeholder="Why is this habit important?" value={form.notes}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          </div>
+
+          {/* Preview */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', background: `${form.color}15`, border: `1px solid ${form.color}40`, borderRadius: '12px' }}>
+            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: form.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Check size={16} color="#fff" />
+            </div>
+            <span style={{ fontSize: '22px' }}>{form.icon}</span>
+            <span style={{ fontWeight: '700', color: form.color }}>{form.name || 'Your habit name'}</span>
+          </div>
+
+          <Button onClick={addHabit} disabled={!form.name.trim()}>Create Habit ✅</Button>
+        </div>
+      </Modal>
+
+    </div>
+  )
+}
