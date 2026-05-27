@@ -19,6 +19,7 @@ const DEFAULT_FILES = {
   'health.json': { imported: {}, manualLogs: [] },
   'journal.json': { entries: [] },
   'settings.json': { profile: {}, preferences: {} },
+  'aiChat.json': { messages: [] },
 }
 
 const debounceMap = new Map()
@@ -245,7 +246,7 @@ export async function syncAll() {
   return Object.fromEntries(entries)
 }
 
-export function autoSave(fileName, data, delay = 2000) {
+export function autoSave(fileName, data, delay = 1000) {
   const key = fileName
 
   if (debounceMap.has(key)) {
@@ -275,6 +276,51 @@ export function autoSave(fileName, data, delay = 2000) {
   debounceMap.set(key, { timeoutId, promise })
 
   return promise
+}
+
+// 🔥 FIX 6: New function to delete ALL files from Google Drive
+export async function deleteAllFiles() {
+  try {
+    const folderId = await initializeDrive()
+    const billsFolderId = await ensureBillsFolder()
+
+    // Delete all JSON files
+    const names = Object.keys(DEFAULT_FILES)
+    await Promise.all(
+      names.map(async fileName => {
+        try {
+          const file = await findFileInFolder(fileName, folderId)
+          if (file) {
+            await driveFetch(`${DRIVE_API}/${file.id}`, { method: 'DELETE' })
+          }
+        } catch (error) {
+          console.error(`Failed to delete ${fileName}:`, error)
+        }
+      })
+    )
+
+    // Delete bills folder contents
+    try {
+      const billsQuery = encodeURIComponent(`'${billsFolderId}' in parents and trashed=false`)
+      const res = await driveFetch(`${DRIVE_API}?q=${billsQuery}&fields=files(id)`)
+      const data = await res.json()
+
+      await Promise.all(
+        (data.files || []).map(file =>
+          driveFetch(`${DRIVE_API}/${file.id}`, { method: 'DELETE' }).catch(err =>
+            console.error(`Failed to delete bill ${file.id}:`, err)
+          )
+        )
+      )
+    } catch (error) {
+      console.error('Failed to delete bills:', error)
+    }
+
+    console.log('All files deleted from Google Drive')
+  } catch (error) {
+    console.error('Failed to delete all files:', error)
+    throw error
+  }
 }
 
 export function clearDriveCache() {
