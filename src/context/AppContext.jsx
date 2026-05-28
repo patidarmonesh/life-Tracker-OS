@@ -364,7 +364,8 @@ export function AppProvider({ children }) {
   const notifyDriveAuthNeeded = useCallback(() => {
     if (authWarningShownRef.current) return
     authWarningShownRef.current = true
-    window.alert('Google Drive session expired. Please sign out and sign in again to continue sync.')
+    dispatch({ type: 'SET_SYNC_STATUS', status: 'auth_required' })
+    console.warn('Google Drive session expired. Please sign out and sign in again to continue sync.')
   }, [])
 
   const applyDriveSyncResult = useCallback((syncResult) => {
@@ -390,7 +391,11 @@ export function AppProvider({ children }) {
     async ({ markSyncing = true, ensureFiles = true, forceApply = false } = {}) => {
       const token = getAccessToken()
       if (!token) {
-        dispatch({ type: 'SET_SYNC_STATUS', status: 'offline' })
+        if (isAuthenticated) {
+          notifyDriveAuthNeeded()
+        } else {
+          dispatch({ type: 'SET_SYNC_STATUS', status: 'offline' })
+        }
         return null
       }
 
@@ -422,7 +427,7 @@ export function AppProvider({ children }) {
         syncInFlightRef.current = false
       }
     },
-    [applyDriveSyncResult]
+    [applyDriveSyncResult, isAuthenticated, notifyDriveAuthNeeded]
   )
 
   useEffect(() => {
@@ -522,10 +527,6 @@ export function AppProvider({ children }) {
           notifyDriveAuthNeeded()
           return
         }
-        dispatch({
-          type: 'SET_SYNC_STATUS',
-          status: navigator.onLine ? 'idle' : 'offline',
-        })
       })
     }
 
@@ -567,10 +568,6 @@ export function AppProvider({ children }) {
           notifyDriveAuthNeeded()
           return
         }
-        dispatch({
-          type: 'SET_SYNC_STATUS',
-          status: navigator.onLine ? 'idle' : 'offline',
-        })
       })
     }
 
@@ -596,25 +593,29 @@ export function AppProvider({ children }) {
   // Retry pull automatically after local fallback
   useEffect(() => {
     if (!state.hydrated || !isAuthReady || !isAuthenticated) return
+    if (state.syncStatus === 'auth_required') return
     if (!localFallbackPendingRef.current || !navigator.onLine || !getAccessToken()) return
 
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current)
+    const scheduleRetry = () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current)
+      }
+
+      retryTimeoutRef.current = setTimeout(() => {
+        performDrivePull({ markSyncing: true, ensureFiles: true, forceApply: true }).catch(error => {
+          console.error('Retry sync failed:', error)
+          if (isDriveAuthError(error)) {
+            notifyDriveAuthNeeded()
+            return
+          }
+          if (localFallbackPendingRef.current) {
+            scheduleRetry()
+          }
+        })
+      }, LOCAL_RETRY_DELAY)
     }
 
-    retryTimeoutRef.current = setTimeout(() => {
-      performDrivePull({ markSyncing: true, ensureFiles: true, forceApply: true }).catch(error => {
-        console.error('Retry sync failed:', error)
-        if (isDriveAuthError(error)) {
-          notifyDriveAuthNeeded()
-          return
-        }
-        dispatch({
-          type: 'SET_SYNC_STATUS',
-          status: navigator.onLine ? 'idle' : 'offline',
-        })
-      })
-    }, LOCAL_RETRY_DELAY)
+    scheduleRetry()
 
     return () => {
       if (retryTimeoutRef.current) {
