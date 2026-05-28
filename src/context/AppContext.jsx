@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+} from 'react'
 import {
   sampleExpenses,
   sampleSessions,
@@ -17,9 +25,14 @@ import {
   clearDriveCache,
 } from '../services/driveService'
 import { getAccessToken } from '../services/authService'
+import { useAuth } from './AuthContext'
 
 const STORAGE_KEY = 'lifeos-app-state-v1'
 const LAST_SYNC_KEY = 'lifeos-last-sync-time'
+const SYNC_INTERVAL_ACTIVE = 15000
+const SYNC_INTERVAL_HIDDEN = 45000
+const AUTO_REFRESH_COOLDOWN = 5000
+const LOCAL_RETRY_DELAY = 10000
 
 const initialState = {
   finance: { expenses: [], budgets: {}, categories: [], bills: [] },
@@ -328,50 +341,108 @@ function reducer(state, action) {
 
 const AppContext = createContext(null)
 
-let syncIntervalId = null
-
 export function AppProvider({ children }) {
+  const { isAuthReady, isAuthenticated } = useAuth()
   const [state, dispatch] = useReducer(reducer, initialState)
   const remoteMetadataRef = useRef(state.remoteMetadata)
+  const syncIntervalRef = useRef(null)
+  const syncInFlightRef = useRef(false)
+  const retryTimeoutRef = useRef(null)
+  const lastAutoRefreshRef = useRef(0)
+  const localFallbackPendingRef = useRef(false)
+  const authWarningShownRef = useRef(false)
 
   useEffect(() => {
     remoteMetadataRef.current = state.remoteMetadata
   }, [state.remoteMetadata])
+
+  const isDriveAuthError = useCallback((error) => {
+    const message = error?.message || ''
+    return message.includes('Drive request failed: 401') || message.includes('Drive request failed: 403')
+  }, [])
+
+  const notifyDriveAuthNeeded = useCallback(() => {
+    if (authWarningShownRef.current) return
+    authWarningShownRef.current = true
+    window.alert('Google Drive session expired. Please sign out and sign in again to continue sync.')
+  }, [])
+
+  const applyDriveSyncResult = useCallback((syncResult) => {
+    const mergedDriveState = syncResultToAppState(syncResult)
+    const syncTime = syncResult.latestRemoteModified || new Date().toISOString()
+
+    dispatch({
+      type: 'HYDRATE_STATE',
+      data: {
+        ...mergedDriveState,
+        syncStatus: 'synced',
+        lastSynced: syncTime,
+        hydrated: true,
+        isFromDrive: true,
+      },
+    })
+    localStorage.setItem(LAST_SYNC_KEY, syncTime)
+    localFallbackPendingRef.current = false
+    authWarningShownRef.current = false
+  }, [])
+
+  const performDrivePull = useCallback(
+    async ({ markSyncing = true, ensureFiles = true, forceApply = false } = {}) => {
+      const token = getAccessToken()
+      if (!token) {
+        dispatch({ type: 'SET_SYNC_STATUS', status: 'offline' })
+        return null
+      }
+
+      if (syncInFlightRef.current) return null
+      syncInFlightRef.current = true
+
+      if (markSyncing) {
+        dispatch({ type: 'SET_SYNC_STATUS', status: 'syncing' })
+      }
+
+      try {
+        if (ensureFiles) {
+          await ensureInitialFiles()
+        }
+        const syncResult = await syncAll()
+        const hasChanges = hasRemoteStateChanged(syncResult.metadata, remoteMetadataRef.current)
+
+        if (!forceApply && !hasChanges) {
+          dispatch({
+            type: 'SET_SYNC_STATUS',
+            status: navigator.onLine ? 'synced' : 'offline',
+          })
+          return syncResult
+        }
+
+        applyDriveSyncResult(syncResult)
+        return syncResult
+      } finally {
+        syncInFlightRef.current = false
+      }
+    },
+    [applyDriveSyncResult]
+  )
 
   useEffect(() => {
     let cancelled = false
 
     async function hydrateApp() {
       try {
-        if (!cancelled) {
-          dispatch({ type: 'SET_SYNC_STATUS', status: 'syncing' })
-        }
+        if (!isAuthReady) return
+        if (!cancelled) dispatch({ type: 'SET_SYNC_STATUS', status: 'syncing' })
 
-        const token = getAccessToken()
-
-        if (token) {
+        if (isAuthenticated && getAccessToken()) {
           try {
-            await ensureInitialFiles()
-            const syncResult = await syncAll()
-            const mergedDriveState = syncResultToAppState(syncResult)
-            const syncTime = syncResult.latestRemoteModified || new Date().toISOString()
-
-            if (!cancelled) {
-              dispatch({
-                type: 'HYDRATE_STATE',
-                data: {
-                  ...mergedDriveState,
-                  syncStatus: 'synced',
-                  lastSynced: syncTime,
-                  hydrated: true,
-                  isFromDrive: true,
-                },
-              })
-              localStorage.setItem(LAST_SYNC_KEY, syncTime)
-            }
+            await performDrivePull({ markSyncing: false, ensureFiles: true, forceApply: true })
             return
           } catch (driveError) {
             console.warn('Drive sync failed, falling back to local cache:', driveError)
+            if (isDriveAuthError(driveError)) {
+              notifyDriveAuthNeeded()
+            }
+            localFallbackPendingRef.current = true
           }
         }
 
@@ -385,11 +456,14 @@ export function AppProvider({ children }) {
                 type: 'HYDRATE_STATE',
                 data: {
                   ...mergeWithInitialState(localData),
-                  syncStatus: navigator.onLine ? 'offline' : 'offline',
+                  syncStatus: 'offline',
                   hydrated: true,
                   isFromDrive: false,
                 },
               })
+            }
+            if (isAuthenticated && getAccessToken()) {
+              localFallbackPendingRef.current = true
             }
           } else {
             throw new Error('No local data')
@@ -406,6 +480,9 @@ export function AppProvider({ children }) {
               },
             })
           }
+          if (isAuthenticated && getAccessToken()) {
+            localFallbackPendingRef.current = true
+          }
         }
       } catch (error) {
         console.error('Fatal app initialization error:', error)
@@ -420,6 +497,9 @@ export function AppProvider({ children }) {
             },
           })
         }
+        if (isAuthenticated && getAccessToken()) {
+          localFallbackPendingRef.current = true
+        }
       }
     }
 
@@ -428,51 +508,120 @@ export function AppProvider({ children }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [isAuthenticated, isAuthReady, isDriveAuthError, notifyDriveAuthNeeded, performDrivePull])
 
-  // 🔥 FIX 2: Periodic sync every 15 seconds for cross-device updates
+  // Periodic sync for cross-device updates, adaptive to tab visibility
   useEffect(() => {
-    if (!state.hydrated) return
+    if (!state.hydrated || !isAuthReady || !isAuthenticated) return
+    if (!getAccessToken()) return
 
-    const token = getAccessToken()
-    if (!token) return
-
-    const performPeriodicSync = async () => {
-      try {
-        const syncResult = await syncAll()
-        if (!hasRemoteStateChanged(syncResult.metadata, remoteMetadataRef.current)) {
-          dispatch({
-            type: 'SET_SYNC_STATUS',
-            status: navigator.onLine ? 'synced' : 'offline',
-          })
+    const runPeriodicSync = () => {
+      performDrivePull({ markSyncing: false, ensureFiles: false, forceApply: false }).catch(error => {
+        console.error('Periodic sync failed:', error)
+        if (isDriveAuthError(error)) {
+          notifyDriveAuthNeeded()
           return
         }
-
-        const mergedDriveState = syncResultToAppState(syncResult)
-        const syncTime = syncResult.latestRemoteModified || new Date().toISOString()
-
         dispatch({
-          type: 'HYDRATE_STATE',
-          data: {
-            ...mergedDriveState,
-            syncStatus: 'synced',
-            lastSynced: syncTime,
-            hydrated: true,
-            isFromDrive: true,
-          },
+          type: 'SET_SYNC_STATUS',
+          status: navigator.onLine ? 'idle' : 'offline',
         })
-        localStorage.setItem(LAST_SYNC_KEY, syncTime)
-      } catch (error) {
-        console.error('Periodic sync failed:', error)
+      })
+    }
+
+    const restartInterval = () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current)
+      }
+      const delay =
+        document.visibilityState === 'visible'
+          ? SYNC_INTERVAL_ACTIVE
+          : SYNC_INTERVAL_HIDDEN
+      syncIntervalRef.current = setInterval(runPeriodicSync, delay)
+    }
+
+    restartInterval()
+    document.addEventListener('visibilitychange', restartInterval)
+
+    return () => {
+      document.removeEventListener('visibilitychange', restartInterval)
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current)
+      }
+    }
+  }, [isAuthenticated, isAuthReady, isDriveAuthError, notifyDriveAuthNeeded, performDrivePull, state.hydrated])
+
+  // Immediate auto refresh on foreground/online/login transitions
+  useEffect(() => {
+    if (!state.hydrated || !isAuthReady || !isAuthenticated) return
+    if (!getAccessToken()) return
+
+    const triggerAutoRefresh = () => {
+      const now = Date.now()
+      if (now - lastAutoRefreshRef.current < AUTO_REFRESH_COOLDOWN) return
+      lastAutoRefreshRef.current = now
+
+      performDrivePull({ markSyncing: false, ensureFiles: true, forceApply: true }).catch(error => {
+        console.error('Auto refresh failed:', error)
+        if (isDriveAuthError(error)) {
+          notifyDriveAuthNeeded()
+          return
+        }
+        dispatch({
+          type: 'SET_SYNC_STATUS',
+          status: navigator.onLine ? 'idle' : 'offline',
+        })
+      })
+    }
+
+    triggerAutoRefresh()
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        triggerAutoRefresh()
       }
     }
 
-    syncIntervalId = setInterval(performPeriodicSync, 15000) // Every 15 seconds
+    window.addEventListener('focus', triggerAutoRefresh)
+    window.addEventListener('online', triggerAutoRefresh)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
-      if (syncIntervalId) clearInterval(syncIntervalId)
+      window.removeEventListener('focus', triggerAutoRefresh)
+      window.removeEventListener('online', triggerAutoRefresh)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [state.hydrated])
+  }, [isAuthenticated, isAuthReady, isDriveAuthError, notifyDriveAuthNeeded, performDrivePull, state.hydrated])
+
+  // Retry pull automatically after local fallback
+  useEffect(() => {
+    if (!state.hydrated || !isAuthReady || !isAuthenticated) return
+    if (!localFallbackPendingRef.current || !navigator.onLine || !getAccessToken()) return
+
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current)
+    }
+
+    retryTimeoutRef.current = setTimeout(() => {
+      performDrivePull({ markSyncing: true, ensureFiles: true, forceApply: true }).catch(error => {
+        console.error('Retry sync failed:', error)
+        if (isDriveAuthError(error)) {
+          notifyDriveAuthNeeded()
+          return
+        }
+        dispatch({
+          type: 'SET_SYNC_STATUS',
+          status: navigator.onLine ? 'idle' : 'offline',
+        })
+      })
+    }, LOCAL_RETRY_DELAY)
+
+    return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current)
+      }
+    }
+  }, [isAuthenticated, isAuthReady, isDriveAuthError, notifyDriveAuthNeeded, performDrivePull, state.hydrated, state.syncStatus])
 
   // Auto-save to localStorage (fallback only)
   useEffect(() => {
@@ -505,9 +654,14 @@ export function AppProvider({ children }) {
             time: syncTime,
           })
           localStorage.setItem(LAST_SYNC_KEY, syncTime)
+          authWarningShownRef.current = false
         })
         .catch(error => {
           console.error(`Failed scheduling auto-save for ${module}:`, error)
+          if (isDriveAuthError(error)) {
+            notifyDriveAuthNeeded()
+            localFallbackPendingRef.current = true
+          }
           dispatch({
             type: 'SET_SYNC_STATUS',
             status: navigator.onLine ? 'idle' : 'offline',
@@ -584,9 +738,10 @@ export function AppProvider({ children }) {
 
       if (token) {
         const emptyState = buildClearedState()
-        Object.entries(MODULE_FILE_MAP).forEach(([module, fileName]) => {
-          autoSave(fileName, emptyState[module], 0)
-            .then(result => {
+        await Promise.all(
+          Object.entries(MODULE_FILE_MAP).map(async ([module, fileName]) => {
+            try {
+              const result = await autoSave(fileName, emptyState[module], 0)
               dispatch({
                 type: 'SET_REMOTE_METADATA',
                 fileName,
@@ -598,41 +753,28 @@ export function AppProvider({ children }) {
                 syncStatus: navigator.onLine ? 'synced' : 'offline',
                 time: result?.modifiedTime || new Date().toISOString(),
               })
-            })
-            .catch(error => {
+            } catch (error) {
               console.error(`Failed to recreate ${module} after delete all:`, error)
-            })
-        })
+            }
+          })
+        )
+
+        try {
+          await performDrivePull({ markSyncing: true, ensureFiles: false, forceApply: true })
+        } catch (error) {
+          console.error('Failed pull-confirm after delete all:', error)
+        }
       }
     }
 
     const refreshFromDrive = async () => {
       try {
-        dispatch({ type: 'SET_SYNC_STATUS', status: 'syncing' })
-        const token = getAccessToken()
-        if (!token) {
-          dispatch({ type: 'SET_SYNC_STATUS', status: 'offline' })
-          return
-        }
-
-        await ensureInitialFiles()
-        const syncResult = await syncAll()
-        const mergedDriveState = syncResultToAppState(syncResult)
-        const syncTime = syncResult.latestRemoteModified || new Date().toISOString()
-
-        dispatch({
-          type: 'HYDRATE_STATE',
-          data: {
-            ...mergedDriveState,
-            syncStatus: 'synced',
-            lastSynced: syncTime,
-            hydrated: true,
-            isFromDrive: true,
-          },
-        })
-        localStorage.setItem(LAST_SYNC_KEY, syncTime)
+        await performDrivePull({ markSyncing: true, ensureFiles: true, forceApply: true })
       } catch (error) {
         console.error('Manual refresh failed:', error)
+        if (isDriveAuthError(error)) {
+          notifyDriveAuthNeeded()
+        }
         dispatch({
           type: 'SET_SYNC_STATUS',
           status: navigator.onLine ? 'idle' : 'offline',
@@ -649,7 +791,7 @@ export function AppProvider({ children }) {
       resetToSample,
       refreshFromDrive,
     }
-  }, [state])
+  }, [isDriveAuthError, notifyDriveAuthNeeded, performDrivePull, state])
 
   return <AppContext.Provider value={api}>{children}</AppContext.Provider>
 }
