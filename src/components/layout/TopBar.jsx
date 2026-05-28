@@ -28,6 +28,15 @@ export default function TopBar() {
       }
     }
 
+    if (syncStatus === 'auth_required') {
+      return {
+        icon: CloudOff,
+        label: 'Drive reconnect needed',
+        color: '#f97316',
+        spin: false,
+      }
+    }
+
     if (syncStatus === 'synced') {
       return {
         icon: CheckCircle,
