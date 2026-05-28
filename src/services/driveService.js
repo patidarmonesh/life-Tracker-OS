@@ -402,7 +402,10 @@ export async function deleteDriveFile(fileId) {
     await deleteDriveItem(fileId)
   } catch (error) {
     const message = error?.message || ''
-    if (message.includes('404')) return
+    if (message.includes('404')) {
+      console.warn(`Drive file ${fileId} not found during deletion; skipping.`)
+      return
+    }
     throw error
   }
 }
