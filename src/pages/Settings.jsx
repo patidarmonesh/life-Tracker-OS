@@ -20,7 +20,7 @@ const DEFAULT_TIME_CATEGORIES = [
 ]
 
 export default function Settings() {
-  const { state, setModule } = useApp()
+  const { state, setModule, resetToSample, refreshFromDrive } = useApp()
   const fileRef = useRef(null)
   const [newExpenseCategory, setNewExpenseCategory] = useState('')
   const [newTimeCategory, setNewTimeCategory] = useState('')
@@ -174,29 +174,20 @@ export default function Settings() {
     if (emptyMap[moduleKey]) setModule(moduleKey, emptyMap[moduleKey])
   }
 
-  function deleteAllData() {
+  async function deleteAllData() {
     if (deleteConfirm !== 'DELETE ALL') {
       alert('Type DELETE ALL exactly to confirm.')
       return
     }
-    ;['finance','timeflow','study','habits','health','journal','aiChat'].forEach(key => {
-      clearModuleDirect(key)
-    })
-    setDeleteConfirm('')
-    alert('All app data cleared.')
-  }
 
-  function clearModuleDirect(moduleKey) {
-    const emptyMap = {
-      finance: { expenses: [] },
-      timeflow: { entries: [] },
-      study: { sessions: [], goals: {}, subjects: [] },
-      habits: { habits: [], completions: {} },
-      health: { bodyLogs: [], nutrition: [], hevyWorkouts: [] },
-      journal: { entries: [] },
-      aiChat: { messages: [] },
+    try {
+      await resetToSample()
+      setDeleteConfirm('')
+      alert('All app data cleared locally and on Drive.')
+    } catch (error) {
+      console.error('Delete all failed:', error)
+      alert('Delete all failed. Please try again.')
     }
-    if (emptyMap[moduleKey]) setModule(moduleKey, emptyMap[moduleKey])
   }
 
   const sectionTitle = (icon, title, subtitle) => (
@@ -478,6 +469,9 @@ export default function Settings() {
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
             <Button onClick={exportAllData}>
               <Download size={14} /> Export Backup
+            </Button>
+            <Button variant="secondary" onClick={refreshFromDrive}>
+              Refresh from Drive
             </Button>
             <Button variant="secondary" onClick={() => fileRef.current?.click()}>
               <Upload size={14} /> Import Backup

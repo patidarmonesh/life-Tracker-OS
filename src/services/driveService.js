@@ -23,6 +23,7 @@ const DEFAULT_FILES = {
 }
 
 const debounceMap = new Map()
+const JSON_FILE_NAMES = Object.keys(DEFAULT_FILES)
 
 function getHeaders(extra = {}) {
   const token = getAccessToken()
@@ -134,14 +135,87 @@ async function findFileInFolder(fileName, folderId) {
   return data.files?.[0] || null
 }
 
-export async function getFile(fileName) {
+async function listFiles(query, fields = 'nextPageToken,files(id,name,mimeType,modifiedTime,parents)', pageToken = null) {
+  const params = new URLSearchParams({
+    q: query,
+    fields,
+    pageSize: '1000',
+  })
+
+  if (pageToken) {
+    params.set('pageToken', pageToken)
+  }
+
+  const res = await driveFetch(`${DRIVE_API}?${params.toString()}`)
+  return res.json()
+}
+
+async function listAllFiles(query, fields = 'nextPageToken,files(id,name,mimeType,modifiedTime,parents)') {
+  const files = []
+  let pageToken = null
+
+  do {
+    const data = await listFiles(query, fields, pageToken)
+    files.push(...(data.files || []))
+    pageToken = data.nextPageToken || null
+  } while (pageToken)
+
+  return files
+}
+
+async function deleteDriveItem(itemId) {
+  await driveFetch(`${DRIVE_API}/${itemId}`, { method: 'DELETE' })
+}
+
+async function deleteFolderContentsRecursively(folderId) {
+  const query = `'${folderId}' in parents and trashed=false`
+  const items = await listAllFiles(query)
+
+  await Promise.all(
+    items.map(async item => {
+      try {
+        if (item.mimeType === 'application/vnd.google-apps.folder') {
+          await deleteFolderContentsRecursively(item.id)
+        }
+        await deleteDriveItem(item.id)
+      } catch (error) {
+        console.error(`Failed to delete Drive item ${item.name || item.id}:`, error)
+      }
+    })
+  )
+}
+
+async function getFileEntry(fileName) {
   const folderId = await initializeDrive()
-  const file = await findFileInFolder(fileName, folderId)
+  return findFileInFolder(fileName, folderId)
+}
+
+export async function getFile(fileName) {
+  const file = await getFileEntry(fileName)
 
   if (!file) return null
 
   const res = await driveFetch(`${DRIVE_API}/${file.id}?alt=media`)
   return res.json()
+}
+
+export async function getFileMetadata(fileName) {
+  const file = await getFileEntry(fileName)
+  if (!file) return null
+
+  return {
+    id: file.id,
+    name: file.name,
+    modifiedTime: file.modifiedTime || null,
+  }
+}
+
+export async function getAllFileMetadata() {
+  const entries = await Promise.all(
+    JSON_FILE_NAMES.map(async fileName => [fileName, await getFileMetadata(fileName)])
+  )
+
+  return Object.fromEntries(entries)
 }
 
 export async function saveFile(fileName, data) {
@@ -223,10 +297,8 @@ export async function ensureInitialFiles() {
   await initializeDrive()
   await ensureBillsFolder()
 
-  const names = Object.keys(DEFAULT_FILES)
-
   await Promise.all(
-    names.map(async fileName => {
+    JSON_FILE_NAMES.map(async fileName => {
       const existing = await getFile(fileName)
       if (!existing) {
         await saveFile(fileName, DEFAULT_FILES[fileName])
@@ -237,13 +309,56 @@ export async function ensureInitialFiles() {
 
 export async function syncAll() {
   const entries = await Promise.all(
-    Object.keys(DEFAULT_FILES).map(async fileName => {
-      const content = await getFile(fileName)
-      return [fileName, content ?? DEFAULT_FILES[fileName]]
+    JSON_FILE_NAMES.map(async fileName => {
+      const file = await getFileEntry(fileName)
+
+      if (!file) {
+        return [
+          fileName,
+          {
+            content: DEFAULT_FILES[fileName],
+            metadata: null,
+          },
+        ]
+      }
+
+      const res = await driveFetch(`${DRIVE_API}/${file.id}?alt=media`)
+      const content = await res.json()
+
+      return [
+        fileName,
+        {
+          content: content ?? DEFAULT_FILES[fileName],
+          metadata: {
+            id: file.id,
+            name: file.name,
+            modifiedTime: file.modifiedTime || null,
+          },
+        },
+      ]
     })
   )
 
-  return Object.fromEntries(entries)
+  const files = {}
+  const metadata = {}
+
+  entries.forEach(([fileName, value]) => {
+    files[fileName] = value.content
+    metadata[fileName] = value.metadata
+  })
+
+  const latestRemoteModified =
+    Object.values(metadata)
+      .map(file => file?.modifiedTime)
+      .filter(Boolean)
+      .sort()
+      .at(-1) || null
+
+  return {
+    files,
+    metadata,
+    latestRemoteModified,
+  }
 }
 
 export function autoSave(fileName, data, delay = 1000) {
@@ -278,20 +393,29 @@ export function autoSave(fileName, data, delay = 1000) {
   return promise
 }
 
-// 🔥 FIX 6: New function to delete ALL files from Google Drive
+export async function deleteDriveFile(fileId) {
+  if (!fileId) return
+
+  try {
+    await deleteDriveItem(fileId)
+  } catch (error) {
+    const message = error?.message || ''
+    if (message.includes('404')) return
+    throw error
+  }
+}
+
 export async function deleteAllFiles() {
   try {
     const folderId = await initializeDrive()
-    const billsFolderId = await ensureBillsFolder()
+    const billsFolder = await findFolderByName('Bills', folderId)
 
-    // Delete all JSON files
-    const names = Object.keys(DEFAULT_FILES)
     await Promise.all(
-      names.map(async fileName => {
+      JSON_FILE_NAMES.map(async fileName => {
         try {
           const file = await findFileInFolder(fileName, folderId)
           if (file) {
-            await driveFetch(`${DRIVE_API}/${file.id}`, { method: 'DELETE' })
+            await deleteDriveItem(file.id)
           }
         } catch (error) {
           console.error(`Failed to delete ${fileName}:`, error)
@@ -299,23 +423,16 @@ export async function deleteAllFiles() {
       })
     )
 
-    // Delete bills folder contents
-    try {
-      const billsQuery = encodeURIComponent(`'${billsFolderId}' in parents and trashed=false`)
-      const res = await driveFetch(`${DRIVE_API}?q=${billsQuery}&fields=files(id)`)
-      const data = await res.json()
-
-      await Promise.all(
-        (data.files || []).map(file =>
-          driveFetch(`${DRIVE_API}/${file.id}`, { method: 'DELETE' }).catch(err =>
-            console.error(`Failed to delete bill ${file.id}:`, err)
-          )
-        )
-      )
-    } catch (error) {
-      console.error('Failed to delete bills:', error)
+    if (billsFolder?.id) {
+      try {
+        await deleteFolderContentsRecursively(billsFolder.id)
+        await deleteDriveItem(billsFolder.id)
+      } catch (error) {
+        console.error('Failed to delete bills folder:', error)
+      }
     }
 
+    clearDriveCache()
     console.log('All files deleted from Google Drive')
   } catch (error) {
     console.error('Failed to delete all files:', error)

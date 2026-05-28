@@ -117,7 +117,8 @@ export function getStoredSession() {
 }
 
 export function getAccessToken() {
-  return accessToken
+  if (accessToken) return accessToken
+  return getStoredSession()?.accessToken || null
 }
 
 export function signOutGoogle() {
