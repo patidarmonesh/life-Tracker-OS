@@ -351,8 +351,10 @@ export async function syncAll() {
     Object.values(metadata)
       .map(file => file?.modifiedTime)
       .filter(Boolean)
-      .sort((a, b) => new Date(a) - new Date(b))
-      .at(-1) || null
+      .reduce((latest, current) => {
+        if (!latest) return current
+        return new Date(current) > new Date(latest) ? current : latest
+      }, null) || null
 
   return {
     files,

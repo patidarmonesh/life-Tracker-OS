@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useReducer } from 'react'
+import { createContext, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import {
   sampleExpenses,
   sampleSessions,
@@ -332,6 +332,11 @@ let syncIntervalId = null
 
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState)
+  const remoteMetadataRef = useRef(state.remoteMetadata)
+
+  useEffect(() => {
+    remoteMetadataRef.current = state.remoteMetadata
+  }, [state.remoteMetadata])
 
   useEffect(() => {
     let cancelled = false
@@ -435,7 +440,7 @@ export function AppProvider({ children }) {
     const performPeriodicSync = async () => {
       try {
         const syncResult = await syncAll()
-        if (!hasRemoteStateChanged(syncResult.metadata, state.remoteMetadata)) {
+        if (!hasRemoteStateChanged(syncResult.metadata, remoteMetadataRef.current)) {
           dispatch({
             type: 'SET_SYNC_STATUS',
             status: navigator.onLine ? 'synced' : 'offline',
@@ -467,7 +472,7 @@ export function AppProvider({ children }) {
     return () => {
       if (syncIntervalId) clearInterval(syncIntervalId)
     }
-  }, [state.hydrated, state.remoteMetadata])
+  }, [state.hydrated])
 
   // Auto-save to localStorage (fallback only)
   useEffect(() => {
