@@ -33,6 +33,8 @@ const SYNC_INTERVAL_ACTIVE = 15000
 const SYNC_INTERVAL_HIDDEN = 45000
 const AUTO_REFRESH_COOLDOWN = 5000
 const LOCAL_RETRY_DELAY = 10000
+const MAX_LOCAL_RETRY_ATTEMPTS = 6
+const MAX_RETRY_DELAY = 120000
 
 const initialState = {
   finance: { expenses: [], budgets: {}, categories: [], bills: [] },
@@ -348,6 +350,7 @@ export function AppProvider({ children }) {
   const syncIntervalRef = useRef(null)
   const syncInFlightRef = useRef(false)
   const retryTimeoutRef = useRef(null)
+  const retryAttemptRef = useRef(0)
   const lastAutoRefreshRef = useRef(0)
   const localFallbackPendingRef = useRef(false)
   const authWarningShownRef = useRef(false)
@@ -355,6 +358,12 @@ export function AppProvider({ children }) {
   useEffect(() => {
     remoteMetadataRef.current = state.remoteMetadata
   }, [state.remoteMetadata])
+
+  useEffect(() => {
+    if (isAuthenticated && getAccessToken()) {
+      authWarningShownRef.current = false
+    }
+  }, [isAuthenticated])
 
   const isDriveAuthError = useCallback((error) => {
     const message = error?.message || ''
@@ -384,6 +393,7 @@ export function AppProvider({ children }) {
     })
     localStorage.setItem(LAST_SYNC_KEY, syncTime)
     localFallbackPendingRef.current = false
+    retryAttemptRef.current = 0
     authWarningShownRef.current = false
   }, [])
 
@@ -527,6 +537,10 @@ export function AppProvider({ children }) {
           notifyDriveAuthNeeded()
           return
         }
+        dispatch({
+          type: 'SET_SYNC_STATUS',
+          status: navigator.onLine ? 'idle' : 'offline',
+        })
       })
     }
 
@@ -568,6 +582,10 @@ export function AppProvider({ children }) {
           notifyDriveAuthNeeded()
           return
         }
+        dispatch({
+          type: 'SET_SYNC_STATUS',
+          status: navigator.onLine ? 'idle' : 'offline',
+        })
       })
     }
 
@@ -601,6 +619,18 @@ export function AppProvider({ children }) {
         clearTimeout(retryTimeoutRef.current)
       }
 
+      const attempt = retryAttemptRef.current
+      if (attempt >= MAX_LOCAL_RETRY_ATTEMPTS) {
+        console.warn('Stopping automatic retry after max attempts. Manual refresh may be needed.')
+        dispatch({
+          type: 'SET_SYNC_STATUS',
+          status: navigator.onLine ? 'idle' : 'offline',
+        })
+        return
+      }
+
+      const delay = Math.min(LOCAL_RETRY_DELAY * 2 ** attempt, MAX_RETRY_DELAY)
+
       retryTimeoutRef.current = setTimeout(() => {
         performDrivePull({ markSyncing: true, ensureFiles: true, forceApply: true }).catch(error => {
           console.error('Retry sync failed:', error)
@@ -608,11 +638,12 @@ export function AppProvider({ children }) {
             notifyDriveAuthNeeded()
             return
           }
+          retryAttemptRef.current += 1
           if (localFallbackPendingRef.current) {
             scheduleRetry()
           }
         })
-      }, LOCAL_RETRY_DELAY)
+      }, delay)
     }
 
     scheduleRetry()
@@ -739,6 +770,7 @@ export function AppProvider({ children }) {
 
       if (token) {
         const emptyState = buildClearedState()
+        let recreateFailures = 0
         await Promise.all(
           Object.entries(MODULE_FILE_MAP).map(async ([module, fileName]) => {
             try {
@@ -755,15 +787,37 @@ export function AppProvider({ children }) {
                 time: result?.modifiedTime || new Date().toISOString(),
               })
             } catch (error) {
-              console.error(`Failed to recreate ${module} after delete all:`, error)
+              recreateFailures += 1
+              console.error(
+                `Failed to recreate ${module} after delete all: ${error?.message || 'unknown error'}`,
+                error
+              )
             }
           })
         )
+
+        if (recreateFailures > 0) {
+          console.warn(
+            `Delete-all recreation completed with ${recreateFailures} failed module(s).`
+          )
+          dispatch({
+            type: 'SET_SYNC_STATUS',
+            status: navigator.onLine ? 'idle' : 'offline',
+          })
+        }
 
         try {
           await performDrivePull({ markSyncing: true, ensureFiles: false, forceApply: true })
         } catch (error) {
           console.error('Failed pull-confirm after delete all:', error)
+          if (isDriveAuthError(error)) {
+            notifyDriveAuthNeeded()
+          } else {
+            dispatch({
+              type: 'SET_SYNC_STATUS',
+              status: navigator.onLine ? 'idle' : 'offline',
+            })
+          }
         }
       }
     }
