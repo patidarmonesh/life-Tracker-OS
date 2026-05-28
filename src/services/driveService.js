@@ -351,7 +351,7 @@ export async function syncAll() {
     Object.values(metadata)
       .map(file => file?.modifiedTime)
       .filter(Boolean)
-      .sort()
+      .sort((a, b) => new Date(a) - new Date(b))
       .at(-1) || null
 
   return {

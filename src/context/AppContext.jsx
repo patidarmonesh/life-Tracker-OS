@@ -436,6 +436,10 @@ export function AppProvider({ children }) {
       try {
         const syncResult = await syncAll()
         if (!hasRemoteStateChanged(syncResult.metadata, state.remoteMetadata)) {
+          dispatch({
+            type: 'SET_SYNC_STATUS',
+            status: navigator.onLine ? 'synced' : 'offline',
+          })
           return
         }
 
