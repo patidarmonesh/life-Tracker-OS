@@ -12,6 +12,7 @@ import {
   ensureBillsFolder,
   getBillsFolderId,
   uploadBase64FileToDrive,
+  deleteDriveFile,
 } from '../services/driveService'
 const today = format(new Date(), 'yyyy-MM-dd')
 
@@ -645,25 +646,7 @@ export default function Finance() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '12px' }}>
                 {bills.map(bill => (
                   <Card key={bill.id} onClick={() => setSelectedBill(bill)} style={{ padding: '12px', cursor: 'pointer' }}>
-                    {bill.base64 && bill.fileType?.startsWith('image') ? (
-                      <img src={bill.base64} alt={bill.fileName} style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px' }} />
-                    ) : (
-                      <div
-                        style={{
-                          width: '100%',
-                          height: '100px',
-                          background: 'var(--bg-secondary)',
-                          borderRadius: '8px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '32px',
-                          marginBottom: '8px',
-                        }}
-                      >
-                        📄
-                      </div>
-                    )}
+                    <BillPreview bill={bill} height={100} />
                     <div style={{ fontSize: '12px', fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bill.fileName}</div>
                     {bill.suggestedAmount ? (
                       <div style={{ fontSize: '15px', fontWeight: '800', color: '#10B981', fontFamily: 'JetBrains Mono, monospace', marginTop: '4px' }}>
@@ -677,9 +660,14 @@ export default function Finance() {
                       <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>Not linked yet</div>
                     )}
                     <button
-                      onClick={e => {
+                      onClick={async e => {
                         e.stopPropagation()
                         if (window.confirm('Delete this bill?')) {
+                          try {
+                            await deleteDriveFile(bill.driveFileId)
+                          } catch (error) {
+                            console.error('Failed to delete bill from Drive:', error)
+                          }
                           saveBills(bills.filter(b => b.id !== bill.id))
                           if (selectedBill?.id === bill.id) setSelectedBill(null)
                           if (pendingBillForExpense?.id === bill.id) setPendingBillForExpense(null)
@@ -838,13 +826,7 @@ export default function Finance() {
       <Modal isOpen={!!selectedBill} onClose={() => setSelectedBill(null)} title="Bill Details">
         {selectedBill ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {selectedBill.base64 && selectedBill.fileType?.startsWith('image') ? (
-              <img
-                src={selectedBill.base64}
-                alt="bill"
-                style={{ width: '100%', borderRadius: '10px', maxHeight: '280px', objectFit: 'contain', background: 'var(--bg-secondary)' }}
-              />
-            ) : null}
+            <BillPreview bill={selectedBill} height={280} contain />
 
             {selectedBill.suggestedAmount ? (
               <div
@@ -1005,5 +987,47 @@ function ExpenseRow({ expense: e, onDelete, showDate = false }) {
         <Trash2 size={14} />
       </button>
     </div>
+  )
+}
+
+function BillPreview({ bill, height, contain = false }) {
+  const [hasError, setHasError] = useState(false)
+  const previewSrc = bill?.base64 || bill?.driveDownloadUrl || bill?.driveFileUrl || ''
+  const isImage = bill?.fileType?.startsWith('image') && previewSrc && !hasError
+
+  if (!isImage) {
+    return (
+      <div
+        style={{
+          width: '100%',
+          height: `${height}px`,
+          background: 'var(--bg-secondary)',
+          borderRadius: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '32px',
+          marginBottom: '8px',
+        }}
+      >
+        📄
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src={previewSrc}
+      alt={bill?.fileName || 'bill'}
+      onError={() => setHasError(true)}
+      style={{
+        width: '100%',
+        height: `${height}px`,
+        objectFit: contain ? 'contain' : 'cover',
+        borderRadius: '8px',
+        background: 'var(--bg-secondary)',
+        marginBottom: '8px',
+      }}
+    />
   )
 }
