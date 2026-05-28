@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useReducer } from 'react'
+import { createContext, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import {
   sampleExpenses,
   sampleSessions,
@@ -9,7 +9,13 @@ import {
   sampleHealthLogs,
   sampleSettings,
 } from '../data/sampleData'
-import { syncAll, autoSave, ensureInitialFiles, deleteAllFiles } from '../services/driveService'
+import {
+  syncAll,
+  autoSave,
+  ensureInitialFiles,
+  deleteAllFiles,
+  clearDriveCache,
+} from '../services/driveService'
 import { getAccessToken } from '../services/authService'
 
 const STORAGE_KEY = 'lifeos-app-state-v1'
@@ -78,6 +84,8 @@ const initialState = {
   aiChat: { messages: [] },
   syncStatus: 'idle',
   lastSynced: null,
+  lastRemoteModified: null,
+  remoteMetadata: {},
   hydrated: false,
   isFromDrive: false, // Track if data came from Google Drive
 }
@@ -137,6 +145,20 @@ function buildSampleState() {
     },
     syncStatus: 'synced',
     lastSynced: new Date().toISOString(),
+    lastRemoteModified: null,
+    remoteMetadata: {},
+    hydrated: true,
+    isFromDrive: false,
+  }
+}
+
+function buildClearedState() {
+  return {
+    ...mergeWithInitialState(),
+    syncStatus: 'synced',
+    lastSynced: new Date().toISOString(),
+    lastRemoteModified: null,
+    remoteMetadata: {},
     hydrated: true,
     isFromDrive: false,
   }
@@ -185,6 +207,8 @@ function mergeWithInitialState(data = {}) {
       ...initialState.aiChat,
       ...(data.aiChat || {}),
     },
+    lastRemoteModified: data.lastRemoteModified || null,
+    remoteMetadata: data.remoteMetadata || {},
   }
 }
 
@@ -198,6 +222,31 @@ function driveDataToAppState(files) {
     journal: files['journal.json'],
     settings: files['settings.json'],
     aiChat: files['aiChat.json'],
+  })
+}
+
+function syncResultToAppState(syncResult) {
+  return {
+    ...driveDataToAppState(syncResult.files),
+    remoteMetadata: syncResult.metadata || {},
+    lastRemoteModified: syncResult.latestRemoteModified || null,
+  }
+}
+
+function hasRemoteStateChanged(remoteMetadata = {}, currentMetadata = {}) {
+  const fileNames = Object.values(MODULE_FILE_MAP)
+
+  return fileNames.some(fileName => {
+    const remote = remoteMetadata[fileName] || null
+    const current = currentMetadata[fileName] || null
+
+    if (!remote && !current) return false
+    if (!remote || !current) return true
+
+    return (
+      remote.id !== current.id ||
+      (remote.modifiedTime || '') !== (current.modifiedTime || '')
+    )
   })
 }
 
@@ -236,6 +285,22 @@ function reducer(state, action) {
         lastSynced: action.time || state.lastSynced,
       }
 
+    case 'SET_REMOTE_METADATA':
+      return {
+        ...state,
+        remoteMetadata: {
+          ...state.remoteMetadata,
+          [action.fileName]: {
+            ...(state.remoteMetadata[action.fileName] || {}),
+            ...(action.metadata || {}),
+          },
+        },
+        lastRemoteModified:
+          action.metadata?.modifiedTime || state.lastRemoteModified,
+        syncStatus: action.syncStatus || state.syncStatus,
+        lastSynced: action.time || state.lastSynced,
+      }
+
     case 'SET_SETTINGS':
       return {
         ...state,
@@ -254,7 +319,7 @@ function reducer(state, action) {
       }
 
     case 'RESET_TO_SAMPLE':
-      return buildSampleState()
+      return buildClearedState()
 
     default:
       return state
@@ -267,13 +332,17 @@ let syncIntervalId = null
 
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState)
+  const remoteMetadataRef = useRef(state.remoteMetadata)
+
+  useEffect(() => {
+    remoteMetadataRef.current = state.remoteMetadata
+  }, [state.remoteMetadata])
 
   useEffect(() => {
     let cancelled = false
 
     async function hydrateApp() {
       try {
-        // 🔥 FIX 1: Try Google Drive FIRST, not localStorage
         if (!cancelled) {
           dispatch({ type: 'SET_SYNC_STATUS', status: 'syncing' })
         }
@@ -283,8 +352,9 @@ export function AppProvider({ children }) {
         if (token) {
           try {
             await ensureInitialFiles()
-            const files = await syncAll()
-            const mergedDriveState = driveDataToAppState(files)
+            const syncResult = await syncAll()
+            const mergedDriveState = syncResultToAppState(syncResult)
+            const syncTime = syncResult.latestRemoteModified || new Date().toISOString()
 
             if (!cancelled) {
               dispatch({
@@ -292,12 +362,12 @@ export function AppProvider({ children }) {
                 data: {
                   ...mergedDriveState,
                   syncStatus: 'synced',
-                  lastSynced: new Date().toISOString(),
+                  lastSynced: syncTime,
                   hydrated: true,
                   isFromDrive: true,
                 },
               })
-              localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString())
+              localStorage.setItem(LAST_SYNC_KEY, syncTime)
             }
             return
           } catch (driveError) {
@@ -369,19 +439,29 @@ export function AppProvider({ children }) {
 
     const performPeriodicSync = async () => {
       try {
-        const files = await syncAll()
-        const mergedDriveState = driveDataToAppState(files)
+        const syncResult = await syncAll()
+        if (!hasRemoteStateChanged(syncResult.metadata, remoteMetadataRef.current)) {
+          dispatch({
+            type: 'SET_SYNC_STATUS',
+            status: navigator.onLine ? 'synced' : 'offline',
+          })
+          return
+        }
+
+        const mergedDriveState = syncResultToAppState(syncResult)
+        const syncTime = syncResult.latestRemoteModified || new Date().toISOString()
 
         dispatch({
           type: 'HYDRATE_STATE',
           data: {
             ...mergedDriveState,
             syncStatus: 'synced',
-            lastSynced: new Date().toISOString(),
+            lastSynced: syncTime,
             hydrated: true,
             isFromDrive: true,
           },
         })
+        localStorage.setItem(LAST_SYNC_KEY, syncTime)
       } catch (error) {
         console.error('Periodic sync failed:', error)
       }
@@ -410,22 +490,29 @@ export function AppProvider({ children }) {
       if (!fileName) return
 
       dispatch({ type: 'SET_SYNC_STATUS', status: 'syncing' })
-
-      try {
-        // 🔥 FIX 3: Always save to Google Drive first
-        autoSave(fileName, data, 1000) // Reduced delay for faster sync
-        dispatch({
-          type: 'SET_SYNC_STATUS',
-          status: navigator.onLine ? 'synced' : 'offline',
-          time: new Date().toISOString(),
+      autoSave(fileName, data, 1000)
+        .then(result => {
+          const syncTime = result?.modifiedTime || new Date().toISOString()
+          dispatch({
+            type: 'SET_REMOTE_METADATA',
+            fileName,
+            metadata: {
+              id: result?.id || null,
+              name: fileName,
+              modifiedTime: result?.modifiedTime || null,
+            },
+            syncStatus: navigator.onLine ? 'synced' : 'offline',
+            time: syncTime,
+          })
+          localStorage.setItem(LAST_SYNC_KEY, syncTime)
         })
-      } catch (error) {
-        console.error(`Failed scheduling auto-save for ${module}:`, error)
-        dispatch({
-          type: 'SET_SYNC_STATUS',
-          status: navigator.onLine ? 'idle' : 'offline',
+        .catch(error => {
+          console.error(`Failed scheduling auto-save for ${module}:`, error)
+          dispatch({
+            type: 'SET_SYNC_STATUS',
+            status: navigator.onLine ? 'idle' : 'offline',
+          })
         })
-      }
     }
 
     const setModule = (module, data) => {
@@ -479,14 +566,11 @@ export function AppProvider({ children }) {
       persistModule('settings', nextSettings)
     }
 
-    // 🔥 FIX 4: Delete all data from BOTH Google Drive AND localStorage
     const resetToSample = async () => {
-      const sample = buildSampleState()
+      const token = getAccessToken()
       dispatch({ type: 'RESET_TO_SAMPLE' })
 
-      // Delete from Google Drive first
       try {
-        const token = getAccessToken()
         if (token) {
           await deleteAllFiles()
         }
@@ -494,20 +578,34 @@ export function AppProvider({ children }) {
         console.error('Failed to delete from Google Drive:', error)
       }
 
-      // Then reset local storage
       localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(LAST_SYNC_KEY)
+      clearDriveCache()
 
-      // Save sample data
-      persistModule('finance', sample.finance)
-      persistModule('timeflow', sample.timeflow)
-      persistModule('study', sample.study)
-      persistModule('habits', sample.habits)
-      persistModule('health', sample.health)
-      persistModule('journal', sample.journal)
-      persistModule('settings', sample.settings)
+      if (token) {
+        const emptyState = buildClearedState()
+        Object.entries(MODULE_FILE_MAP).forEach(([module, fileName]) => {
+          autoSave(fileName, emptyState[module], 0)
+            .then(result => {
+              dispatch({
+                type: 'SET_REMOTE_METADATA',
+                fileName,
+                metadata: {
+                  id: result?.id || null,
+                  name: fileName,
+                  modifiedTime: result?.modifiedTime || null,
+                },
+                syncStatus: navigator.onLine ? 'synced' : 'offline',
+                time: result?.modifiedTime || new Date().toISOString(),
+              })
+            })
+            .catch(error => {
+              console.error(`Failed to recreate ${module} after delete all:`, error)
+            })
+        })
+      }
     }
 
-    // 🔥 FIX 5: Manual refresh function to sync from Google Drive
     const refreshFromDrive = async () => {
       try {
         dispatch({ type: 'SET_SYNC_STATUS', status: 'syncing' })
@@ -517,19 +615,22 @@ export function AppProvider({ children }) {
           return
         }
 
-        const files = await syncAll()
-        const mergedDriveState = driveDataToAppState(files)
+        await ensureInitialFiles()
+        const syncResult = await syncAll()
+        const mergedDriveState = syncResultToAppState(syncResult)
+        const syncTime = syncResult.latestRemoteModified || new Date().toISOString()
 
         dispatch({
           type: 'HYDRATE_STATE',
           data: {
             ...mergedDriveState,
             syncStatus: 'synced',
-            lastSynced: new Date().toISOString(),
+            lastSynced: syncTime,
             hydrated: true,
             isFromDrive: true,
           },
         })
+        localStorage.setItem(LAST_SYNC_KEY, syncTime)
       } catch (error) {
         console.error('Manual refresh failed:', error)
         dispatch({
