@@ -185,10 +185,14 @@ export default function Finance() {
   function handleDelete(id) {
     if (!window.confirm('Delete this expense?')) return
 
+    const updatedBills = bills.map(b =>
+      b.linkedExpenseId === id ? { ...b, linkedExpenseId: null } : b
+    )
+
     setModule('finance', {
       ...state.finance,
       expenses: expenses.filter(e => e.id !== id),
-      bills,
+      bills: updatedBills,
     })
   }
 
