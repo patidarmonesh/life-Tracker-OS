@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useApp } from '../context/AppContext'
-import { format, subDays } from 'date-fns'
+import { subDays } from 'date-fns'
 import { v4 as uuid } from 'uuid'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
@@ -10,8 +10,7 @@ import { Plus, Search, Trash2, BookOpen, Smile } from 'lucide-react'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
-
-const today = format(new Date(), 'yyyy-MM-dd')
+import { formatDateKey, getTodayDateKey, toDateKey } from '../utils/dateTime'
 
 const MOODS = [
   { value: 1, emoji: '😞', label: 'Very Low', color: '#EF4444' },
@@ -32,6 +31,8 @@ const PROMPTS = [
 
 export default function Journal() {
   const { state, setModule } = useApp()
+  const timezone = state.settings?.profile?.timezone
+  const today = getTodayDateKey(timezone)
   const [activeTab, setActiveTab] = useState('entries')
   const [showNewModal, setShowNewModal] = useState(false)
   const [search, setSearch] = useState('')
@@ -62,13 +63,13 @@ export default function Journal() {
   })
 
   const last14Mood = Array.from({ length: 14 }, (_, i) => {
-    const d = format(subDays(new Date(), 13 - i), 'yyyy-MM-dd')
+    const d = toDateKey(subDays(new Date(), 13 - i), timezone)
     const dayEntries = entries.filter(e => e.date === d)
     const avgMood = dayEntries.length
       ? +(dayEntries.reduce((a, e) => a + (e.mood || 0), 0) / dayEntries.length).toFixed(1)
       : null
     return {
-      day: format(new Date(d + 'T00:00:00'), 'MMM d'),
+      day: formatDateKey(d, timezone, { month: 'short', day: 'numeric' }),
       mood: avgMood,
     }
   })
