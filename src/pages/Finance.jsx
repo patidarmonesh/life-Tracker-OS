@@ -722,6 +722,7 @@ export default function Finance() {
             <label style={labelStyle}>Amount ({currencySymbol})</label>
             <input
               autoFocus
+              aria-label={`Amount in ${currencyCode}`}
               style={{ ...inputStyle, fontSize: '28px', fontFamily: 'JetBrains Mono, monospace', fontWeight: '800' }}
               type="number"
               placeholder="0"

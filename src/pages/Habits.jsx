@@ -12,14 +12,6 @@ const HABIT_ICONS = ['💪', '📚', '💧', '🧘', '🏃', '🥗', '😴', '�
 const HABIT_COLORS = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#F97316', '#06B6D4', '#EF4444', '#6366F1', '#84CC16']
 const CATEGORIES = ['Health', 'Fitness', 'Study', 'Mindfulness', 'Nutrition', 'Sleep', 'Social', 'Other']
 
-const DEFAULT_CHECKPOINTS = [
-  { id: uuid(), title: 'Morning Workout', icon: '💪', color: '#EC4899', category: 'Fitness', isActive: true, createdAt: new Date().toISOString() },
-  { id: uuid(), title: 'Read / Study', icon: '📚', color: '#3B82F6', category: 'Study', isActive: true, createdAt: new Date().toISOString() },
-  { id: uuid(), title: 'Drink 3L Water', icon: '💧', color: '#06B6D4', category: 'Health', isActive: true, createdAt: new Date().toISOString() },
-  { id: uuid(), title: 'No Social Media before 12pm', icon: '📵', color: '#F43F5E', category: 'Other', isActive: true, createdAt: new Date().toISOString() },
-  { id: uuid(), title: 'Sleep before 1am', icon: '😴', color: '#8B5CF6', category: 'Sleep', isActive: true, createdAt: new Date().toISOString() },
-]
-
 export default function Habits() {
   const { state, setModule } = useApp()
   const timezone = state.settings?.profile?.timezone
@@ -31,8 +23,7 @@ export default function Habits() {
   const [viewedMonth, setViewedMonth] = useState(new Date())
   const [form, setForm] = useState({ name: '', icon: '🎯', color: '#10B981', category: 'Health', notes: '' })
 
-  const hasCheckpoints = (state.habits?.checkpoints || []).length > 0
-  const habits = hasCheckpoints ? (state.habits?.checkpoints || []).filter(h => h.isActive !== false) : DEFAULT_CHECKPOINTS
+  const habits = (state.habits?.checkpoints || []).filter(h => h.isActive !== false)
   const dailyLogs = state.habits?.dailyLogs || []
 
   const monthDays = useMemo(() => getMonthDays(viewedMonth, timezone), [viewedMonth, timezone])
@@ -136,6 +127,8 @@ export default function Habits() {
     })
   }
 
+  const getHabitTitle = habit => habit.title || habit.name || 'Untitled Habit'
+
   const todayDone = habits.filter(h => isCompleted(h.id, selectedDate)).length
   const todayPct = habits.length > 0 ? Math.round((todayDone / habits.length) * 100) : 0
 
@@ -221,7 +214,7 @@ export default function Habits() {
                   <div style={{ fontSize: '22px', flexShrink: 0 }}>{habit.icon || '🎯'}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '14px', fontWeight: '700', color: done ? (habit.color || '#10B981') : 'var(--text-primary)', textDecoration: done ? 'line-through' : 'none', textDecorationColor: habit.color || '#10B981' }}>
-                      {habit.title || habit.name}
+                      {getHabitTitle(habit)}
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '1px' }}>
                       {habit.category || 'Other'} {streak > 0 && `• 🔥 ${streak} day streak`}
@@ -259,7 +252,7 @@ export default function Habits() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
                     <div style={{ fontSize: '24px' }}>{habit.icon || '🎯'}</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '14px', fontWeight: '700' }}>{habit.title || habit.name}</div>
+                      <div style={{ fontSize: '14px', fontWeight: '700' }}>{getHabitTitle(habit)}</div>
                       <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{habit.category || 'Other'}</div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
@@ -318,7 +311,7 @@ export default function Habits() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span style={{ fontSize: '20px' }}>{habit.icon || '🎯'}</span>
-                      <span style={{ fontWeight: '700', fontSize: '14px' }}>{habit.title || habit.name}</span>
+                      <span style={{ fontWeight: '700', fontSize: '14px' }}>{getHabitTitle(habit)}</span>
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{completedCount}/{monthLength} days</div>
                   </div>

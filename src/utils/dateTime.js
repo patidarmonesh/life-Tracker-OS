@@ -40,13 +40,13 @@ export function getTodayDateKey(timezone) {
 }
 
 export function parseDateKey(dateKey) {
-  return new Date(`${dateKey}T12:00:00Z`)
+  // Date keys are treated as canonical calendar days and parsed at UTC midnight.
+  return new Date(`${dateKey}T00:00:00Z`)
 }
 
-export function formatDateKey(dateKey, timezone, options) {
-  const normalizedTimezone = normalizeTimezone(timezone)
+export function formatDateKey(dateKey, _timezone, options) {
   const date = parseDateKey(dateKey)
-  return new Intl.DateTimeFormat('en-US', { timeZone: normalizedTimezone, ...options }).format(date)
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', ...options }).format(date)
 }
 
 export function getRecentDateKeys(length, timezone, referenceDate = new Date()) {

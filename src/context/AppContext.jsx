@@ -346,6 +346,7 @@ const AppContext = createContext(null)
 export function AppProvider({ children }) {
   const { isAuthReady, isAuthenticated } = useAuth()
   const [state, dispatch] = useReducer(reducer, initialState)
+  const latestStateRef = useRef(state)
   const remoteMetadataRef = useRef(state.remoteMetadata)
   const syncIntervalRef = useRef(null)
   const syncInFlightRef = useRef(false)
@@ -355,6 +356,10 @@ export function AppProvider({ children }) {
   const lastAutoRefreshRef = useRef(0)
   const localFallbackPendingRef = useRef(false)
   const authWarningShownRef = useRef(false)
+
+  useEffect(() => {
+    latestStateRef.current = state
+  }, [state])
 
   useEffect(() => {
     remoteMetadataRef.current = state.remoteMetadata
@@ -659,14 +664,13 @@ export function AppProvider({ children }) {
   // Auto-save to localStorage (fallback only)
   useEffect(() => {
     if (!state.hydrated) return
-    const serializedState = JSON.stringify(state)
     if (localSaveTimeoutRef.current) {
       clearTimeout(localSaveTimeoutRef.current)
     }
 
     localSaveTimeoutRef.current = setTimeout(() => {
       try {
-        localStorage.setItem(STORAGE_KEY, serializedState)
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(latestStateRef.current))
       } catch (error) {
         console.error('Failed to save app state to localStorage:', error)
       }
@@ -677,13 +681,17 @@ export function AppProvider({ children }) {
         clearTimeout(localSaveTimeoutRef.current)
         localSaveTimeoutRef.current = null
       }
-      try {
-        localStorage.setItem(STORAGE_KEY, serializedState)
-      } catch (error) {
-        console.error('Failed to save app state to localStorage:', error)
-      }
     }
   }, [state])
+
+  useEffect(() => () => {
+    // Flush latest state on unmount to avoid losing the final debounced write.
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(latestStateRef.current))
+    } catch (error) {
+      console.error('Failed to save app state to localStorage:', error)
+    }
+  }, [])
 
   const api = useMemo(() => {
     const persistModule = (module, data) => {
