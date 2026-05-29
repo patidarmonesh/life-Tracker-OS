@@ -14,7 +14,8 @@ import {
   uploadBase64FileToDrive,
   deleteDriveFile,
 } from '../services/driveService'
-const today = format(new Date(), 'yyyy-MM-dd')
+import { formatCurrencyAmount, getCurrencySymbol, normalizeCurrency } from '../utils/currency'
+import { getTodayDateKey } from '../utils/dateTime'
 
 const CATEGORY_COLORS = {
   'Food & Drinks': '#F97316',
@@ -48,6 +49,10 @@ const PAYMENT_METHODS = ['UPI', 'Cash', 'Card', 'Net Banking', 'Other']
 
 export default function Finance() {
   const { state, setModule } = useApp()
+  const timezone = state.settings?.profile?.timezone
+  const currencyCode = normalizeCurrency(state.settings?.profile?.currency)
+  const currencySymbol = getCurrencySymbol(currencyCode)
+  const today = getTodayDateKey(timezone)
   const [activeTab, setActiveTab] = useState('today')
   const [showAddModal, setShowAddModal] = useState(false)
   const [selectedBill, setSelectedBill] = useState(null)
@@ -145,7 +150,7 @@ export default function Finance() {
     const newExpense = {
       id: uuid(),
       amount: Number(form.amount),
-      currency: 'INR',
+      currency: currencyCode,
       category: form.category,
       subcategory: form.subcategory,
       description: form.description || linkedBill?.fileName || '',
@@ -392,15 +397,15 @@ export default function Finance() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '14px' }}>
                 <div>
                   <div style={{ fontSize: '36px', fontWeight: '800', fontFamily: 'JetBrains Mono, monospace', color: todayTotal > dailyBudget ? '#F43F5E' : '#10B981' }}>
-                    ₹{todayTotal.toLocaleString()}
+                    {formatCurrencyAmount(todayTotal, currencyCode)}
                   </div>
                   <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>spent today</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: '16px', fontWeight: '700', color: todayTotal > dailyBudget ? '#F43F5E' : 'var(--text-primary)' }}>
-                    ₹{Math.max(0, dailyBudget - todayTotal).toLocaleString()} left
+                    {formatCurrencyAmount(Math.max(0, dailyBudget - todayTotal), currencyCode)} left
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>of ₹{dailyBudget} daily budget</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>of {formatCurrencyAmount(dailyBudget, currencyCode)} daily budget</div>
                 </div>
               </div>
               <div style={{ height: '8px', background: 'var(--bg-secondary)', borderRadius: '4px', overflow: 'hidden' }}>
@@ -415,9 +420,9 @@ export default function Finance() {
                 />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px' }}>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>₹0</span>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatCurrencyAmount(0, currencyCode)}</span>
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{Math.round(pct)}% of daily budget</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>₹{dailyBudget}</span>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatCurrencyAmount(dailyBudget, currencyCode)}</span>
               </div>
             </Card>
 
@@ -435,7 +440,7 @@ export default function Finance() {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {todayExpenses.map(e => (
-                    <ExpenseRow key={e.id} expense={e} onDelete={handleDelete} />
+                    <ExpenseRow key={e.id} expense={e} onDelete={handleDelete} defaultCurrency={currencyCode} />
                   ))}
                 </div>
               )}
@@ -447,11 +452,11 @@ export default function Finance() {
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
               {[
-                { label: 'Total Spent', value: `₹${monthTotal.toLocaleString()}`, color: '#F43F5E' },
-                { label: 'Monthly Budget', value: `₹${monthlyBudget.toLocaleString()}`, color: '#3B82F6' },
+                { label: 'Total Spent', value: formatCurrencyAmount(monthTotal, currencyCode), color: '#F43F5E' },
+                { label: 'Monthly Budget', value: formatCurrencyAmount(monthlyBudget, currencyCode), color: '#3B82F6' },
                 {
                   label: monthTotal <= monthlyBudget ? '✅ Saved' : '⚠️ Overspent',
-                  value: `₹${Math.abs(monthlyBudget - monthTotal).toLocaleString()}`,
+                  value: formatCurrencyAmount(Math.abs(monthlyBudget - monthTotal), currencyCode),
                   color: monthTotal <= monthlyBudget ? '#10B981' : '#F43F5E',
                 },
               ].map(({ label, value, color }) => (
@@ -492,7 +497,7 @@ export default function Finance() {
                         ))}
                       </Pie>
                       <Tooltip
-                        formatter={v => `₹${v.toLocaleString()}`}
+                        formatter={v => formatCurrencyAmount(v, currencyCode)}
                         contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '12px' }}
                       />
                     </PieChart>
@@ -502,7 +507,7 @@ export default function Finance() {
                       <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: CATEGORY_COLORS[name] || '#6B7280', flexShrink: 0 }} />
                         <span style={{ fontSize: '12px', flex: 1, color: 'var(--text-secondary)' }}>{name}</span>
-                        <span style={{ fontSize: '12px', fontFamily: 'JetBrains Mono, monospace' }}>₹{value.toLocaleString()}</span>
+                        <span style={{ fontSize: '12px', fontFamily: 'JetBrains Mono, monospace' }}>{formatCurrencyAmount(value, currencyCode)}</span>
                       </div>
                     ))}
                   </div>
@@ -517,7 +522,7 @@ export default function Finance() {
                   <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} interval={4} />
                   <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                   <Tooltip
-                    formatter={v => [`₹${v.toLocaleString()}`, 'Spent']}
+                    formatter={v => [formatCurrencyAmount(v, currencyCode), 'Spent']}
                     contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '12px' }}
                   />
                   <Bar dataKey="total" fill="#10B981" radius={[4, 4, 0, 0]} />
@@ -534,7 +539,7 @@ export default function Finance() {
                 {[...monthExpenses]
                   .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time))
                   .map(e => (
-                    <ExpenseRow key={e.id} expense={e} onDelete={handleDelete} showDate />
+                    <ExpenseRow key={e.id} expense={e} onDelete={handleDelete} showDate defaultCurrency={currencyCode} />
                   ))}
               </div>
             </Card>
@@ -550,7 +555,7 @@ export default function Finance() {
                   <XAxis dataKey="month" tick={{ fontSize: 12, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                   <Tooltip
-                    formatter={v => [`₹${v.toLocaleString()}`, 'Spent']}
+                    formatter={v => [formatCurrencyAmount(v, currencyCode), 'Spent']}
                     contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '12px' }}
                   />
                   <Bar dataKey="total" fill="#6366F1" radius={[4, 4, 0, 0]} />
@@ -562,11 +567,11 @@ export default function Finance() {
               {[
                 {
                   label: 'Monthly Average',
-                  value: `₹${Math.round(monthlyData.reduce((a, m) => a + m.total, 0) / 6).toLocaleString()}`,
+                  value: formatCurrencyAmount(Math.round(monthlyData.reduce((a, m) => a + m.total, 0) / 6), currencyCode),
                 },
                 {
                   label: '6-Month Total',
-                  value: `₹${monthlyData.reduce((a, m) => a + m.total, 0).toLocaleString()}`,
+                  value: formatCurrencyAmount(monthlyData.reduce((a, m) => a + m.total, 0), currencyCode),
                 },
                 {
                   label: 'Best Month (lowest)',
@@ -654,7 +659,7 @@ export default function Finance() {
                     <div style={{ fontSize: '12px', fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bill.fileName}</div>
                     {bill.suggestedAmount ? (
                       <div style={{ fontSize: '15px', fontWeight: '800', color: '#10B981', fontFamily: 'JetBrains Mono, monospace', marginTop: '4px' }}>
-                        ₹{bill.suggestedAmount}
+                        {formatCurrencyAmount(bill.suggestedAmount, currencyCode)}
                       </div>
                     ) : null}
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{new Date(bill.uploadedAt).toLocaleDateString('en-IN')}</div>
@@ -714,7 +719,7 @@ export default function Finance() {
           ) : null}
 
           <div>
-            <label style={labelStyle}>Amount (₹)</label>
+            <label style={labelStyle}>Amount ({currencySymbol})</label>
             <input
               autoFocus
               style={{ ...inputStyle, fontSize: '28px', fontFamily: 'JetBrains Mono, monospace', fontWeight: '800' }}
@@ -846,7 +851,7 @@ export default function Finance() {
               >
                 <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>AI Extracted Amount</span>
                 <span style={{ fontSize: '22px', fontWeight: '800', color: '#10B981', fontFamily: 'JetBrains Mono, monospace' }}>
-                  ₹{selectedBill.suggestedAmount}
+                  {formatCurrencyAmount(selectedBill.suggestedAmount, currencyCode)}
                 </span>
               </div>
             ) : null}
@@ -912,7 +917,7 @@ export default function Finance() {
   )
 }
 
-function ExpenseRow({ expense: e, onDelete, showDate = false }) {
+function ExpenseRow({ expense: e, onDelete, showDate = false, defaultCurrency = 'INR' }) {
   return (
     <div
       style={{
@@ -973,7 +978,7 @@ function ExpenseRow({ expense: e, onDelete, showDate = false }) {
 
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
         <div style={{ fontSize: '15px', fontWeight: '800', fontFamily: 'JetBrains Mono, monospace' }}>
-          ₹{Number(e.amount || 0).toLocaleString()}
+          {formatCurrencyAmount(Number(e.amount || 0), normalizeCurrency(e.currency || defaultCurrency))}
         </div>
         <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{e.time}</div>
       </div>

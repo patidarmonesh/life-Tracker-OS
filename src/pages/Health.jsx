@@ -10,8 +10,7 @@ import { Plus, Upload, Trash2 } from 'lucide-react'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
-
-const today = format(new Date(), 'yyyy-MM-dd')
+import { getTodayDateKey, parseDateKey, toDateKey } from '../utils/dateTime'
 
 const METRIC_CONFIG = {
   weight:      { label: 'Weight',       unit: 'kg',   color: '#3B82F6', icon: '⚖️',  goal: 72 },
@@ -28,6 +27,8 @@ const MACRO_COLORS = {
 
 export default function Health() {
   const { state, setModule } = useApp()
+  const timezone = state.settings?.profile?.timezone
+  const today = getTodayDateKey(timezone)
   const [activeTab, setActiveTab] = useState('body')
   const [showLogModal, setShowLogModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
@@ -60,10 +61,10 @@ export default function Health() {
 
   // ── Nutrition chart data (last 14 days) ─────────────────────
   const last14Nutrition = Array.from({ length: 14 }, (_, i) => {
-    const d = format(subDays(new Date(), 13 - i), 'yyyy-MM-dd')
+    const d = toDateKey(subDays(new Date(), 13 - i), timezone)
     const entry = nutrition.find(n => n.date === d)
     return {
-      day: format(new Date(d + 'T00:00:00'), 'MMM d'),
+      day: format(parseDateKey(d), 'MMM d'),
       calories: entry?.calories || 0,
       protein:  entry?.protein  || 0,
       carbs:    entry?.carbs    || 0,

@@ -1,6 +1,4 @@
-import { format } from 'date-fns'
-
-const today = format(new Date(), 'yyyy-MM-dd')
+import { getTodayDateKey } from './dateTime'
 
 export function calcLifeScore(state) {
   const habits = state?.habits || { checkpoints: [], dailyLogs: [] }
@@ -8,6 +6,8 @@ export function calcLifeScore(state) {
   const finance = state?.finance || { expenses: [] }
   const timeflow = state?.timeflow || { entries: [] }
   const settings = state?.settings || {}
+  const timezone = settings?.profile?.timezone
+  const today = getTodayDateKey(timezone)
 
   const preferences = settings?.preferences || {}
   const dailyStudyGoal = preferences?.dailyStudyGoal ?? 6

@@ -350,6 +350,7 @@ export function AppProvider({ children }) {
   const syncIntervalRef = useRef(null)
   const syncInFlightRef = useRef(false)
   const retryTimeoutRef = useRef(null)
+  const localSaveTimeoutRef = useRef(null)
   const retryAttemptRef = useRef(0)
   const lastAutoRefreshRef = useRef(0)
   const localFallbackPendingRef = useRef(false)
@@ -658,10 +659,22 @@ export function AppProvider({ children }) {
   // Auto-save to localStorage (fallback only)
   useEffect(() => {
     if (!state.hydrated) return
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-    } catch (error) {
-      console.error('Failed to save app state to localStorage:', error)
+    if (localSaveTimeoutRef.current) {
+      clearTimeout(localSaveTimeoutRef.current)
+    }
+
+    localSaveTimeoutRef.current = setTimeout(() => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+      } catch (error) {
+        console.error('Failed to save app state to localStorage:', error)
+      }
+    }, 300)
+
+    return () => {
+      if (localSaveTimeoutRef.current) {
+        clearTimeout(localSaveTimeoutRef.current)
+      }
     }
   }, [state])
 

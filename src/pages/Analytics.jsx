@@ -23,6 +23,7 @@ import { Download } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
+import { formatCurrencyAmount, getCurrencySymbol, normalizeCurrency } from '../utils/currency'
 
 function pearsonCorrelation(xs, ys) {
   if (!xs.length || xs.length !== ys.length) return null
@@ -80,6 +81,8 @@ function downloadCSV(filename, rows) {
 export default function Analytics() {
   const { state } = useApp()
   const [range, setRange] = useState('monthly')
+  const currencyCode = normalizeCurrency(state.settings?.profile?.currency)
+  const currencySymbol = getCurrencySymbol(currencyCode)
 
   const expenses = state.finance?.expenses || []
   const studySessions = state.study?.sessions || []
@@ -265,13 +268,13 @@ export default function Analytics() {
           {[
             { label: 'Life Score', value: analytics.totals.avgLifeScore, color: '#6366F1', icon: '🎯' },
             { label: 'Study Hours', value: analytics.totals.studyHours, color: '#3B82F6', icon: '📘', suffix: 'h' },
-            { label: 'Spent', value: analytics.totals.spend, color: '#10B981', icon: '₹', prefix: '₹' },
+            { label: 'Spent', value: formatCurrencyAmount(analytics.totals.spend, currencyCode), color: '#10B981', icon: currencySymbol },
             { label: 'Mood Avg', value: analytics.totals.avgMood || '—', color: '#F59E0B', icon: '🙂' },
           ].map((card) => (
             <Card key={card.label} style={{ padding: '16px', textAlign: 'center' }}>
               <div style={{ fontSize: '20px' }}>{card.icon}</div>
               <div style={{ fontSize: '22px', fontWeight: '800', fontFamily: 'JetBrains Mono, monospace', color: card.color, marginTop: '6px' }}>
-                {card.prefix || ''}{card.value}{card.suffix || ''}
+                {card.value}{card.suffix || ''}
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{card.label}</div>
             </Card>
@@ -357,7 +360,7 @@ export default function Analytics() {
             In this {range === 'weekly' ? 'week' : range === 'monthly' ? 'month' : 'year'}, your average Life Score is{' '}
             <span style={{ color: '#6366F1', fontWeight: '700' }}>{analytics.totals.avgLifeScore}</span>, with{' '}
             <span style={{ color: '#3B82F6', fontWeight: '700' }}>{analytics.totals.studyHours} hours</span> of study and{' '}
-            <span style={{ color: '#10B981', fontWeight: '700' }}>₹{analytics.totals.spend}</span> spent.
+            <span style={{ color: '#10B981', fontWeight: '700' }}>{formatCurrencyAmount(analytics.totals.spend, currencyCode)}</span> spent.
           </div>
         </Card>
       </div>

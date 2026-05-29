@@ -2,18 +2,21 @@ import { useEffect, useMemo, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
-import { format } from 'date-fns'
+import { v4 as uuid } from 'uuid'
 import { calcLifeScore } from '../utils/scoreCalculator'
 import ScoreRing from '../components/ui/ScoreRing'
 import Card from '../components/ui/Card'
 import { Plus, Sparkles, Zap, ArrowRight } from 'lucide-react'
-
-const today = format(new Date(), 'yyyy-MM-dd')
+import { formatCurrencyAmount } from '../utils/currency'
+import { getTodayDateKey } from '../utils/dateTime'
 
 export default function Home() {
   const { state, setModule } = useApp()
   const { user } = useAuth()
   const navigate = useNavigate()
+  const timezone = state.settings?.profile?.timezone
+  const currency = state.settings?.profile?.currency || 'INR'
+  const today = getTodayDateKey(timezone)
   const [fabOpen, setFabOpen] = useState(false)
   const [isCompactHero, setIsCompactHero] = useState(
     typeof window !== 'undefined' ? window.innerWidth < 920 : false
@@ -62,7 +65,7 @@ export default function Home() {
       : [
           ...allLogs,
           {
-            id: Date.now().toString(),
+          id: uuid(),
             checkpointId: cpId,
             date: today,
             status: 'done',
@@ -126,8 +129,8 @@ export default function Home() {
       {
         icon: '💸',
         label: 'Spent Today',
-        value: `₹${todaySpend}`,
-        sub: `₹${dailyBudget} daily budget`,
+        value: formatCurrencyAmount(todaySpend, currency),
+        sub: `${formatCurrencyAmount(dailyBudget, currency)} daily budget`,
         color: todaySpend > dailyBudget ? '#FB7185' : '#34D399',
         to: '/finance',
       },
