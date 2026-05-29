@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useApp } from '../context/AppContext'
-import { format, subDays } from 'date-fns'
+import { subDays } from 'date-fns'
 import { v4 as uuid } from 'uuid'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { Plus, Trash2, BookOpen, Timer, Target } from 'lucide-react'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
-import { getTodayDateKey, parseDateKey, toDateKey } from '../utils/dateTime'
+import { formatDateKey, getTodayDateKey, toDateKey } from '../utils/dateTime'
 
 const SUBJECTS = [
   'Mathematics', 'Physics', 'CS Theory', 'Machine Learning', 'Deep Learning',
@@ -50,7 +50,7 @@ export default function Study() {
   const last7Days = Array.from({ length: 7 }, (_, i) => {
     const d = toDateKey(subDays(new Date(), 6 - i), timezone)
     const mins = sessions.filter(s => s.date === d).reduce((a, s) => a + s.durationMinutes, 0)
-    return { day: format(parseDateKey(d), 'EEE'), mins, hours: +(mins / 60).toFixed(1) }
+    return { day: formatDateKey(d, timezone, { weekday: 'short' }), mins, hours: +(mins / 60).toFixed(1) }
   })
 
   const totalHoursThisWeek = +(last7Days.reduce((a, d) => a + d.hours, 0)).toFixed(1)

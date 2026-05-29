@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useApp } from '../context/AppContext'
-import { format, subDays } from 'date-fns'
+import { subDays } from 'date-fns'
 import { v4 as uuid } from 'uuid'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, LineChart, Line, XAxis, YAxis } from 'recharts'
 import { Plus, Sparkles, Trash2, Clock } from 'lucide-react'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
-import { getTodayDateKey, parseDateKey, toDateKey } from '../utils/dateTime'
+import { formatDateKey, getTodayDateKey, toDateKey } from '../utils/dateTime'
 
 const CATEGORY_COLORS = {
   'Sleep': '#8B5CF6',
@@ -67,7 +67,7 @@ export default function TimeFlow() {
     const entries = allEntries.filter(e => e.date === d)
     const prod = entries.filter(e => !e.isWaste && e.category !== 'Sleep' && e.category !== 'Meals').reduce((a, e) => a + e.durationMinutes, 0)
     const waste = entries.filter(e => e.isWaste || WASTE_CATEGORIES.includes(e.category)).reduce((a, e) => a + e.durationMinutes, 0)
-    return { day: format(parseDateKey(d), 'EEE'), productive: +(prod / 60).toFixed(1), waste: +(waste / 60).toFixed(1) }
+    return { day: formatDateKey(d, timezone, { weekday: 'short' }), productive: +(prod / 60).toFixed(1), waste: +(waste / 60).toFixed(1) }
   })
 
   // ── Handlers ──────────────────────────────────────────────

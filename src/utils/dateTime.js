@@ -1,4 +1,4 @@
-import { addMonths, eachDayOfInterval, endOfMonth, format, startOfMonth, subDays } from 'date-fns'
+import { addMonths, subDays } from 'date-fns'
 
 const FALLBACK_TIMEZONE = 'UTC'
 
@@ -40,7 +40,13 @@ export function getTodayDateKey(timezone) {
 }
 
 export function parseDateKey(dateKey) {
-  return new Date(`${dateKey}T00:00:00`)
+  return new Date(`${dateKey}T12:00:00Z`)
+}
+
+export function formatDateKey(dateKey, timezone, options) {
+  const normalizedTimezone = normalizeTimezone(timezone)
+  const date = parseDateKey(dateKey)
+  return new Intl.DateTimeFormat('en-US', { timeZone: normalizedTimezone, ...options }).format(date)
 }
 
 export function getRecentDateKeys(length, timezone, referenceDate = new Date()) {
@@ -49,19 +55,20 @@ export function getRecentDateKeys(length, timezone, referenceDate = new Date()) 
 
 export function getMonthDays(referenceDate = new Date(), timezone) {
   const { year, month } = getParts(referenceDate, timezone)
-  const monthAnchor = new Date(year, month - 1, 1)
-  const start = startOfMonth(monthAnchor)
-  const end = endOfMonth(monthAnchor)
+  const monthLength = new Date(year, month, 0).getDate()
 
-  return eachDayOfInterval({ start, end }).map(date => ({
-    dateKey: format(date, 'yyyy-MM-dd'),
-    dayLabel: format(date, 'd'),
-    weekdayLabel: format(date, 'EEE'),
-  }))
+  return Array.from({ length: monthLength }, (_, index) => {
+    const day = index + 1
+    const dateKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    return {
+      dateKey,
+      dayLabel: String(day),
+      weekdayLabel: formatDateKey(dateKey, timezone, { weekday: 'short' }),
+    }
+  })
 }
 
 export function shiftMonth(referenceDate = new Date(), amount = 0, timezone) {
   const { year, month } = getParts(referenceDate, timezone)
   return addMonths(new Date(year, month - 1, 1), amount)
 }
-

@@ -10,7 +10,7 @@ import { Plus, Upload, Trash2 } from 'lucide-react'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
-import { getTodayDateKey, parseDateKey, toDateKey } from '../utils/dateTime'
+import { formatDateKey, getTodayDateKey, toDateKey } from '../utils/dateTime'
 
 const METRIC_CONFIG = {
   weight:      { label: 'Weight',       unit: 'kg',   color: '#3B82F6', icon: '⚖️',  goal: 72 },
@@ -64,7 +64,7 @@ export default function Health() {
     const d = toDateKey(subDays(new Date(), 13 - i), timezone)
     const entry = nutrition.find(n => n.date === d)
     return {
-      day: format(parseDateKey(d), 'MMM d'),
+      day: formatDateKey(d, timezone, { month: 'short', day: 'numeric' }),
       calories: entry?.calories || 0,
       protein:  entry?.protein  || 0,
       carbs:    entry?.carbs    || 0,

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
+import { format } from 'date-fns'
 import { v4 as uuid } from 'uuid'
 import { calcLifeScore } from '../utils/scoreCalculator'
 import ScoreRing from '../components/ui/ScoreRing'
@@ -187,6 +188,7 @@ export default function Home() {
       latestHealth.steps,
       latestHealth.sleepHours,
       bestStreak,
+      currency,
     ]
   )
 

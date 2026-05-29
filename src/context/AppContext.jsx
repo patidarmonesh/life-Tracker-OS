@@ -659,13 +659,14 @@ export function AppProvider({ children }) {
   // Auto-save to localStorage (fallback only)
   useEffect(() => {
     if (!state.hydrated) return
+    const serializedState = JSON.stringify(state)
     if (localSaveTimeoutRef.current) {
       clearTimeout(localSaveTimeoutRef.current)
     }
 
     localSaveTimeoutRef.current = setTimeout(() => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+        localStorage.setItem(STORAGE_KEY, serializedState)
       } catch (error) {
         console.error('Failed to save app state to localStorage:', error)
       }
@@ -674,6 +675,12 @@ export function AppProvider({ children }) {
     return () => {
       if (localSaveTimeoutRef.current) {
         clearTimeout(localSaveTimeoutRef.current)
+        localSaveTimeoutRef.current = null
+      }
+      try {
+        localStorage.setItem(STORAGE_KEY, serializedState)
+      } catch (error) {
+        console.error('Failed to save app state to localStorage:', error)
       }
     }
   }, [state])

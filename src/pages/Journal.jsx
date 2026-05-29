@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useApp } from '../context/AppContext'
-import { format, subDays } from 'date-fns'
+import { subDays } from 'date-fns'
 import { v4 as uuid } from 'uuid'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
@@ -10,7 +10,7 @@ import { Plus, Search, Trash2, BookOpen, Smile } from 'lucide-react'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
-import { getTodayDateKey, parseDateKey, toDateKey } from '../utils/dateTime'
+import { formatDateKey, getTodayDateKey, toDateKey } from '../utils/dateTime'
 
 const MOODS = [
   { value: 1, emoji: '😞', label: 'Very Low', color: '#EF4444' },
@@ -69,7 +69,7 @@ export default function Journal() {
       ? +(dayEntries.reduce((a, e) => a + (e.mood || 0), 0) / dayEntries.length).toFixed(1)
       : null
     return {
-      day: format(parseDateKey(d), 'MMM d'),
+      day: formatDateKey(d, timezone, { month: 'short', day: 'numeric' }),
       mood: avgMood,
     }
   })

@@ -6,7 +6,7 @@ import { Plus, Trash2, Check, ChevronLeft, ChevronRight } from 'lucide-react'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
-import { getMonthDays, getTodayDateKey, parseDateKey, shiftMonth, toDateKey } from '../utils/dateTime'
+import { formatDateKey, getMonthDays, getTodayDateKey, shiftMonth, toDateKey } from '../utils/dateTime'
 
 const HABIT_ICONS = ['💪', '📚', '💧', '🧘', '🏃', '🥗', '😴', '✍️', '🎯', '🚫', '💊', '🧠', '🌿', '🛁', '📵']
 const HABIT_COLORS = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#F97316', '#06B6D4', '#EF4444', '#6366F1', '#84CC16']
@@ -43,7 +43,7 @@ export default function Habits() {
 
   function toggleHabit(habitId, date) {
     const existingIndex = dailyLogs.findIndex(log => log.checkpointId === habitId && log.date === date)
-    let nextLogs = dailyLogs
+    let nextLogs
 
     if (existingIndex >= 0) {
       const existing = dailyLogs[existingIndex]
@@ -130,7 +130,7 @@ export default function Habits() {
       const dateKey = toDateKey(dateObj, timezone)
       return {
         date: dateKey,
-        day: format(parseDateKey(dateKey), 'EEE'),
+        day: formatDateKey(dateKey, timezone, { weekday: 'short' }),
         done: isCompleted(habitId, dateKey),
       }
     })

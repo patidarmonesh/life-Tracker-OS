@@ -1,4 +1,5 @@
 const FALLBACK_CURRENCY = 'INR'
+const FALLBACK_SYMBOL = '₹'
 const SYMBOL_TO_CODE = {
   '₹': 'INR',
   '$': 'USD',
@@ -23,7 +24,7 @@ export function getCurrencySymbol(currency) {
     }).formatToParts(0)
     return parts.find(part => part.type === 'currency')?.value || code
   } catch {
-    return FALLBACK_CURRENCY
+    return FALLBACK_SYMBOL
   }
 }
 
@@ -41,4 +42,3 @@ export function formatCurrencyAmount(amount, currency, options = {}) {
     return `${getCurrencySymbol(code)}${value.toLocaleString('en-IN')}`
   }
 }
-
