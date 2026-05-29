@@ -141,6 +141,10 @@ export default function Settings() {
     URL.revokeObjectURL(url)
   }
 
+  const VALID_MODULE_KEYS = new Set([
+    'finance', 'timeflow', 'study', 'habits', 'health', 'journal', 'settings', 'aiChat',
+  ])
+
   function importBackup(e) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -150,7 +154,9 @@ export default function Settings() {
         const parsed = JSON.parse(ev.target.result)
         const imported = parsed.data || parsed
         Object.entries(imported).forEach(([key, value]) => {
-          setModule(key, value)
+          if (VALID_MODULE_KEYS.has(key)) {
+            setModule(key, value)
+          }
         })
         alert('Backup imported successfully.')
       } catch {
